@@ -1,0 +1,25 @@
+{
+  "title": "loik160's Widgets",
+  "description": "Forward Widget 合集",
+  "icon": "https://avatars.githubusercontent.com/u/loik160",
+  "widgets": [
+    {
+      "id": "kanav.ad",
+      "title": "KanAV",
+      "description": "KanAV 免费高清视频",
+      "author": "夢 (XPTV转换)",
+      "version": "5.0.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/kanav.js"
+    },
+    {
+      "id": "91jav.fun",
+      "title": "91JAV",
+      "description": "91JAV 中文字幕高清AV",
+      "author": "夢 (XPTV转换)",
+      "version": "1.0.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/91jav.js"
+    }
+  ]
+}
