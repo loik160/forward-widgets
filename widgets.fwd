@@ -20,6 +20,15 @@
       "version": "1.0.0",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/91jav.js"
+    },
+    {
+      "id": "xchina.co",
+      "title": "xChina 小黄书",
+      "description": "小黄书 – 中文AV、日本AV、模特私拍等",
+      "author": "xchina.co",
+      "version": "1.0.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/xchina.js"
     }
   ]
 }
