@@ -20,15 +20,6 @@
       "version": "1.0.0",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/91jav.js"
-    },
-    {
-      "id": "avdbapi.com",
-      "title": "AVDB",
-      "description": "AVDB - AV数据库，海量资源",
-      "author": "XPTV转换",
-      "version": "1.0.0",
-      "requiredVersion": "0.0.1",
-      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/avdb.js"
     }
   ]
 }
