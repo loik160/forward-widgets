@@ -9,45 +9,23 @@ const SITE = 'https://hsex.men';
 var WidgetMetadata = {
     id: "hsex.men",
     title: "好色TV",
-    description: "好色™ Tv – 华语区业余自拍、偷拍、原创成人视频社区",
+    description: "好色TV - 华语区业余自拍偷拍原创成人视频社区",
     author: "hsex.men",
     site: SITE,
-    version: "1.1.0",
+    version: "1.2.0",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
-        {
-            title: "视频列表",
-            functionName: "getVideoList",
-            params: [{ name: "page", title: "页码", type: "page" }]
-        },
-        {
-            title: "周榜 (Weekly Top)",
-            functionName: "getWeeklyTop",
-            params: [{ name: "page", title: "页码", type: "page" }]
-        },
-        {
-            title: "月榜 (Monthly Top)",
-            functionName: "getMonthlyTop",
-            params: [{ name: "page", title: "页码", type: "page" }]
-        },
-        {
-            title: "5分钟+",
-            functionName: "get5Min",
-            params: [{ name: "page", title: "页码", type: "page" }]
-        },
-        {
-            title: "10分钟+",
-            functionName: "get10Min",
-            params: [{ name: "page", title: "页码", type: "page" }]
-        },
+        { title: "视频列表", functionName: "getVideoList", params: [{ name: "page", title: "页码", type: "page" }] },
+        { title: "周榜", functionName: "getWeeklyTop", params: [{ name: "page", title: "页码", type: "page" }] },
+        { title: "月榜", functionName: "getMonthlyTop", params: [{ name: "page", title: "页码", type: "page" }] },
+        { title: "5分钟+", functionName: "get5Min", params: [{ name: "page", title: "页码", type: "page" }] },
+        { title: "10分钟+", functionName: "get10Min", params: [{ name: "page", title: "页码", type: "page" }] },
     ],
     search: {
         title: "搜索",
         functionName: "search",
-        params: [
-            { name: "keyword", title: "关键词", type: "text" },
-        ],
+        params: [],
     },
 };
 
