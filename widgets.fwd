@@ -29,6 +29,15 @@
       "version": "1.0.0",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/xchina.js"
+    },
+    {
+      "id": "hsex.men",
+      "title": "好色TV",
+      "description": "好色™ Tv – 华语区业余自拍、偷拍、原创成人视频",
+      "author": "hsex.men",
+      "version": "1.0.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/hsex.js"
     }
   ]
 }
