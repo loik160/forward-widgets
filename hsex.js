@@ -4,6 +4,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const SITE = "https://hsex.men";
 const VIDEO_PATH_RE = /video-(\d+)\.htm/i;
 const IMG_ATTRS = ["src", "data-src", "data-lazy", "data-original", "data-url"];
+const MAX_REDIRECTS = 5;
 
 var WidgetMetadata = {
     id: "hsex.men",
@@ -11,7 +12,7 @@ var WidgetMetadata = {
     description: "好色TV - 华语区业余自拍偷拍原创成人视频社区",
     author: "hsex.men",
     site: SITE,
-    version: "1.4.0",
+    version: "1.4.1",
     requiredVersion: "0.0.1",
     detailCacheDuration: 60,
     modules: [
@@ -74,7 +75,16 @@ function cleanMediaUrl(url) {
     return out;
 }
 
-async function httpGet(url, referer) {
+function resolveUrl(base, target) {
+    try {
+        return new URL(target, base).toString();
+    } catch (_) {
+        return toAbsoluteUrl(target);
+    }
+}
+
+async function httpGet(url, referer, redirectCount) {
+    const count = redirectCount || 0;
     const response = await Widget.http.get(url, {
         headers: {
             "User-Agent": UA,
@@ -85,7 +95,24 @@ async function httpGet(url, referer) {
     });
 
     if (!response || !response.data) {
+        const status = response && typeof response.status !== "undefined" ? response.status : 0;
+        if ([301, 302, 303, 307, 308].includes(status) && response.headers && response.headers.location) {
+            if (count >= MAX_REDIRECTS) {
+                throw new Error("重定向次数过多: " + url);
+            }
+            const next = resolveUrl(url, response.headers.location);
+            return httpGet(next, referer, count + 1);
+        }
         throw new Error("请求失败: " + url);
+    }
+
+    const statusCode = response.status;
+    if ([301, 302, 303, 307, 308].includes(statusCode) && response.headers && response.headers.location) {
+        if (count >= MAX_REDIRECTS) {
+            throw new Error("重定向次数过多: " + url);
+        }
+        const next = resolveUrl(url, response.headers.location);
+        return httpGet(next, referer, count + 1);
     }
 
     if (isCloudflareBlocked(response.data)) {
@@ -125,9 +152,6 @@ function pickCoverFromNode($scope) {
 }
 
 function pickTitle($container, $anchor) {
-    const aText = ($anchor && $anchor.text && $anchor.text()) ? $anchor.text().trim() : "";
-    if (aText) return aText;
-
     if ($container && $container.length) {
         const h5Text = $container.find("h5 a").first().text().trim();
         if (h5Text) return h5Text;
@@ -136,13 +160,50 @@ function pickTitle($container, $anchor) {
         if (imgAlt.trim()) return imgAlt.trim();
     }
 
+    const aText = ($anchor && $anchor.text && $anchor.text()) ? $anchor.text().trim() : "";
+    if (aText) return aText;
+
     return "";
+}
+
+function isInvalidTitle(title) {
+    const t = String(title || "").trim();
+    if (!t) return true;
+    if (/^(HD|SD|FHD|4K)$/i.test(t)) return true;
+    if (/^\d{1,2}:\d{2}(?::\d{2})?(?:\s*(HD|SD|FHD|4K))?$/i.test(t)) return true;
+    if (/^\d+\s*(次播放|views?)$/i.test(t)) return true;
+    return false;
+}
+
+function buildVideoItem(vodUrl, title, cover) {
+    return {
+        id: vodUrl,
+        type: "url",
+        mediaType: "movie",
+        title: String(title || "").trim(),
+        posterPath: toAbsoluteUrl(cover || ""),
+        link: vodUrl,
+    };
 }
 
 function parseList(html) {
     const $ = Widget.html.load(html);
     const items = [];
     const seen = new Set();
+
+    $("h5 a[href*='video-'], .caption a[href*='video-']").each((_, el) => {
+        const $a = $(el);
+        const vodUrl = getNormalizedVideoUrl($a.attr("href") || "");
+        if (!vodUrl || seen.has(vodUrl)) return;
+
+        const $container = $a.closest(".thumbnail, .item, .video-item, .col-xs-6, .col-sm-4, .col-md-3, li");
+        const title = $a.text().trim();
+        if (isInvalidTitle(title)) return;
+
+        const cover = pickCoverFromNode($container.length ? $container : $a);
+        seen.add(vodUrl);
+        items.push(buildVideoItem(vodUrl, title, cover));
+    });
 
     $("a[href*='video-']").each((_, el) => {
         const $a = $(el);
@@ -152,19 +213,12 @@ function parseList(html) {
 
         const $container = $a.closest(".thumbnail, .item, .video-item, .col-xs-6, .col-sm-4, .col-md-3, li");
         const title = pickTitle($container, $a);
-        if (!title) return;
+        if (isInvalidTitle(title)) return;
 
         const cover = pickCoverFromNode($container.length ? $container : $a);
 
         seen.add(vodUrl);
-        items.push({
-            id: vodUrl,
-            type: "url",
-            mediaType: "movie",
-            title: title,
-            posterPath: cover,
-            link: vodUrl,
-        });
+        items.push(buildVideoItem(vodUrl, title, cover));
     });
 
     if (items.length === 0) {
@@ -178,20 +232,13 @@ function parseList(html) {
             const chunk = html.slice(Math.max(0, m.index - 800), Math.min(html.length, m.index + 1200));
             const titleM = chunk.match(/<h5[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i) || chunk.match(/alt=["']([^"']+)["']/i);
             const title = titleM ? String(titleM[1] || "").trim() : "";
-            if (!title || /^\d{1,2}:\d{2}/.test(title)) continue;
+            if (isInvalidTitle(title)) continue;
 
             const imgM = chunk.match(/<img[^>]+(?:src|data-src|data-lazy|data-original|data-url)=["']([^"']+)["']/i);
             const cover = imgM ? toAbsoluteUrl(imgM[1]) : "";
 
             seen.add(vodUrl);
-            items.push({
-                id: vodUrl,
-                type: "url",
-                mediaType: "movie",
-                title: title,
-                posterPath: cover,
-                link: vodUrl,
-            });
+            items.push(buildVideoItem(vodUrl, title, cover));
         }
     }
 
@@ -276,11 +323,30 @@ async function search(params) {
         throw new Error("请输入关键词");
     }
 
-    const url = `${SITE}/search.htm?search=${encodeURIComponent(kw)}&sort=new&page=${page}`;
-    console.log("[hsex] search:", url);
+    const encoded = encodeURIComponent(kw);
+    const queryBase = `${SITE}/search.htm?search=${encoded}&sort=new`;
+    const candidateUrls = page === 1
+        ? [queryBase]
+        : [
+            `${queryBase}&page=${page}`,
+            `${queryBase}&p=${page}`,
+            `${queryBase}&pageindex=${page}`,
+            `${queryBase}&from=${(page - 1) * 20}`,
+            `${SITE}/search-${encoded}-${page}.htm`,
+        ];
 
-    const html = await httpGet(url, SITE + "/search.htm");
-    const items = parseList(html);
+    let items = [];
+    for (let i = 0; i < candidateUrls.length; i++) {
+        const url = candidateUrls[i];
+        console.log("[hsex] search:", url);
+        try {
+            const html = await httpGet(url, SITE + "/");
+            items = parseList(html);
+            if (items.length > 0) break;
+        } catch (e) {
+            if (i === candidateUrls.length - 1) throw e;
+        }
+    }
 
     if (!items.length && page === 1) {
         throw new Error(`"${kw}" 暂无相关视频`);
