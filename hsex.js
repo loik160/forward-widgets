@@ -12,7 +12,7 @@ var WidgetMetadata = {
     description: "好色TV - 华语区业余自拍偷拍原创成人视频社区",
     author: "hsex.men",
     site: SITE,
-    version: "1.4.1",
+    version: "1.4.2",
     requiredVersion: "0.0.1",
     detailCacheDuration: 60,
     modules: [
@@ -186,6 +186,53 @@ function buildVideoItem(vodUrl, title, cover) {
     };
 }
 
+function getVideoIds(items) {
+    return (items || []).map(it => it && it.id).filter(Boolean);
+}
+
+function isSamePageResult(currentItems, firstPageItems) {
+    const a = getVideoIds(currentItems);
+    const b = getVideoIds(firstPageItems);
+    if (!a.length || !b.length) return false;
+    const n = Math.min(a.length, b.length, 8);
+    for (let i = 0; i < n; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+}
+
+function extractSearchPaginationUrls(html, page, keyword, encodedKeyword) {
+    const urls = [];
+    const seen = new Set();
+    const targetFrom = (page - 1) * 20;
+    const hrefRe = /href=["']([^"']+)["']/ig;
+    let m;
+
+    while ((m = hrefRe.exec(html)) !== null) {
+        const href = String(m[1] || "").replace(/&amp;/g, "&").trim();
+        if (!href || !/search/i.test(href)) continue;
+
+        const full = resolveUrl(SITE + "/", href);
+        const inKeywordScope = full.includes(encodedKeyword) || full.includes(keyword);
+        if (!inKeywordScope) continue;
+
+        const isTargetPage =
+            full.includes(`page=${page}`) ||
+            full.includes(`p=${page}`) ||
+            full.includes(`pageindex=${page}`) ||
+            full.includes(`from=${targetFrom}`) ||
+            new RegExp(`(?:-|/)${page}(?:\\.htm|/|$)`).test(full);
+
+        if (!isTargetPage) continue;
+        if (seen.has(full)) continue;
+
+        seen.add(full);
+        urls.push(full);
+    }
+
+    return urls;
+}
+
 function parseList(html) {
     const $ = Widget.html.load(html);
     const items = [];
@@ -267,26 +314,43 @@ async function getMonthlyTop(p) { return fetchCategory("top_list", (p || {}).pag
 async function get5Min(p) { return fetchCategory("5min_list", (p || {}).page); }
 async function get10Min(p) { return fetchCategory("long_list", (p || {}).page); }
 
+function mediaScore(url) {
+    let score = 0;
+    if (/\.mp4(\?|$)/i.test(url)) score += 120;
+    if (/\.m3u8(\?|$)/i.test(url)) score += 100;
+    if (/(master|index|playlist|stream|play|source)/i.test(url)) score += 20;
+    if (/(audio|aac|stereo)/i.test(url)) score += 15;
+    if (/(preview|poster|thumb|sample|trailer|mute|silent|cover)/i.test(url)) score -= 90;
+    return score;
+}
+
 function extractPlayableUrl(html) {
-    const patterns = [
-        /<source[^>]+src=["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/i,
-        /<video[^>]+src=["']([^"']+\.(?:m3u8|mp4)?[^"']*)["']/i,
-        /(?:url|file|video_url|playUrl|videoUrl|source)\s*[:=]\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/i,
-        /["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i,
-        /["'](https?:\/\/[^"']*\.mp4[^"']*)["']/i,
-        /data-(?:url|src|file)\s*=\s*["']([^"']+)["']/i,
+    const candidates = [];
+    const seen = new Set();
+    const rules = [
+        /<source[^>]+src=["']([^"']+)["']/ig,
+        /<video[^>]+src=["']([^"']+)["']/ig,
+        /(?:url|file|video_url|playUrl|videoUrl|source)\s*[:=]\s*["']([^"']+)["']/ig,
+        /["']((?:https?:)?\/\/[^"'\s]+\.(?:m3u8|mp4)[^"'\s]*)["']/ig,
+        /["'](\/[^"'\s]+\.(?:m3u8|mp4)[^"'\s]*)["']/ig,
+        /data-(?:url|src|file)\s*=\s*["']([^"']+)["']/ig,
     ];
 
-    for (let i = 0; i < patterns.length; i++) {
-        const m = html.match(patterns[i]);
-        if (!m || !m[1]) continue;
-        const cleaned = cleanMediaUrl(m[1]);
-        if (cleaned && /\.(m3u8|mp4)(\?|$)/i.test(cleaned)) {
-            return cleaned;
+    for (let i = 0; i < rules.length; i++) {
+        const re = rules[i];
+        let m;
+        while ((m = re.exec(html)) !== null) {
+            const cleaned = cleanMediaUrl(m[1]);
+            if (!cleaned || !/\.(m3u8|mp4)(\?|$)/i.test(cleaned)) continue;
+            if (seen.has(cleaned)) continue;
+            seen.add(cleaned);
+            candidates.push(cleaned);
         }
     }
 
-    return "";
+    if (!candidates.length) return "";
+    candidates.sort((a, b) => mediaScore(b) - mediaScore(a));
+    return candidates[0];
 }
 
 async function loadDetail(link) {
@@ -302,14 +366,13 @@ async function loadDetail(link) {
 
     console.log("[hsex] videoUrl:", videoUrl);
     return {
-        id: link,
+        id: videoUrl,
         type: "url",
         videoUrl: videoUrl,
         mediaType: "movie",
-        playerType: "system",
         customHeaders: {
             "User-Agent": UA,
-            "Referer": link,
+            "Referer": SITE + "/",
         },
     };
 }
@@ -325,26 +388,54 @@ async function search(params) {
 
     const encoded = encodeURIComponent(kw);
     const queryBase = `${SITE}/search.htm?search=${encoded}&sort=new`;
-    const candidateUrls = page === 1
-        ? [queryBase]
-        : [
+    console.log("[hsex] search:", queryBase);
+    const firstHtml = await httpGet(queryBase, SITE + "/");
+    const firstItems = parseList(firstHtml);
+
+    let items = firstItems;
+    if (page > 1) {
+        const from = (page - 1) * 20;
+        const discovered = extractSearchPaginationUrls(firstHtml, page, kw, encoded);
+        const candidateUrls = [
+            ...discovered,
             `${queryBase}&page=${page}`,
             `${queryBase}&p=${page}`,
             `${queryBase}&pageindex=${page}`,
-            `${queryBase}&from=${(page - 1) * 20}`,
+            `${queryBase}&from=${from}`,
+            `${SITE}/search-${kw}-${page}.htm`,
             `${SITE}/search-${encoded}-${page}.htm`,
+            `${SITE}/search/${kw}/${page}.htm`,
+            `${SITE}/search/${encoded}/${page}.htm`,
+            `${SITE}/search/${kw}.htm?page=${page}`,
         ];
 
-    let items = [];
-    for (let i = 0; i < candidateUrls.length; i++) {
-        const url = candidateUrls[i];
-        console.log("[hsex] search:", url);
-        try {
-            const html = await httpGet(url, SITE + "/");
-            items = parseList(html);
-            if (items.length > 0) break;
-        } catch (e) {
-            if (i === candidateUrls.length - 1) throw e;
+        const unique = [];
+        const seen = new Set();
+        for (let i = 0; i < candidateUrls.length; i++) {
+            const u = String(candidateUrls[i] || "").trim();
+            if (!u || seen.has(u)) continue;
+            seen.add(u);
+            unique.push(u);
+        }
+
+        let loaded = false;
+        for (let i = 0; i < unique.length; i++) {
+            const url = unique[i];
+            console.log("[hsex] search page:", url);
+            try {
+                const html = await httpGet(url, queryBase);
+                const parsed = parseList(html);
+                if (!parsed.length) continue;
+                if (isSamePageResult(parsed, firstItems)) continue;
+                items = parsed;
+                loaded = true;
+                break;
+            } catch (_) {
+            }
+        }
+
+        if (!loaded) {
+            throw new Error(`搜索第 ${page} 页加载失败（站点分页规则可能已变化）`);
         }
     }
 
