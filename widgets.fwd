@@ -74,6 +74,15 @@
       "version": "1.0.0",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/kbjfan.js"
+    },
+    {
+      "id": "uaa.com",
+      "title": "有爱爱",
+      "description": "UAA 有爱爱视频，支持分类、标签与搜索",
+      "author": "夢 (XPTV转换)",
+      "version": "1.0.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/uua.js"
     }
   ]
 }
