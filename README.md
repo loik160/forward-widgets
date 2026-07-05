@@ -19,7 +19,7 @@ https://raw.githubusercontent.com/loik160/forward-widgets/main/widgets.fwd
 | 4k-av | `4kmp.com` | 1.0.0 | 4k-av 影视资源 |
 | 肉视频 | `rou.video` | 1.0.0 | 肉视频分类与搜索 |
 | Beeg | `beeg.com` | 1.0.3 | Beeg 视频资源 |
-| twivideo | `twivideo.net` | 1.0.0 | twivideo 视频下载与排行 |
+| KBJFan | `kbjfan.com` | 1.0.0 | Korean BJ Dance / Nude |
 
 ## 说明
 

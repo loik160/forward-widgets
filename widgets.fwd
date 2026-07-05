@@ -67,13 +67,13 @@
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/beeg.js"
     },
     {
-      "id": "twivideo.net",
-      "title": "twivideo",
-      "description": "twivideo 视频下载与排行",
+      "id": "kbjfan.com",
+      "title": "KBJFan",
+      "description": "KBJFan Korean BJ Dance / Nude",
       "author": "Yswag (XPTV转换)",
       "version": "1.0.0",
       "requiredVersion": "0.0.1",
-      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/twivideo.js"
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/kbjfan.js"
     }
   ]
 }
