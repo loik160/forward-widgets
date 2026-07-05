@@ -38,6 +38,15 @@
       "version": "1.0.0",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/hsex.js"
+    },
+    {
+      "id": "4kmp.com",
+      "title": "4k-av",
+      "description": "4k-av 影视资源，包含电影和电视剧",
+      "author": "夢 (XPTV转换)",
+      "version": "1.0.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/4kav.js"
     }
   ]
 }

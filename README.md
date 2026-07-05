@@ -16,6 +16,7 @@ https://raw.githubusercontent.com/loik160/forward-widgets/main/widgets.fwd
 |------|-----|------|------|
 | KanAV | `kanav.ad` | 5.0.0 | KanAV 免费高清视频 |
 | 91JAV | `91jav.fun` | 1.0.0 | 91JAV 中文字幕高清AV |
+| 4k-av | `4kmp.com` | 1.0.0 | 4k-av 影视资源 |
 
 ## 说明
 
