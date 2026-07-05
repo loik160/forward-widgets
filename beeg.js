@@ -180,10 +180,18 @@ var WidgetMetadata = {
     description: "Beeg 视频资源，支持首页、频道、模特与搜索",
     author: "John Smith (XPTV转换)",
     site: SITE,
-    version: "1.0.1",
+    version: "1.0.2",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
+        {
+            title: "搜索",
+            functionName: "search",
+            params: [
+                { name: "keyword", title: "关键词", type: "input" },
+                { name: "page", title: "页码", type: "page" },
+            ],
+        },
         { title: "Home", functionName: "getHome", params: [{ name: "page", title: "页码", type: "page" }] },
         {
             title: "Channels",
@@ -206,7 +214,10 @@ var WidgetMetadata = {
     search: {
         title: "搜索",
         functionName: "search",
-        params: [],
+        params: [
+            { name: "keyword", title: "关键词", type: "input" },
+            { name: "page", title: "页码", type: "page" },
+        ],
     },
 };
 
