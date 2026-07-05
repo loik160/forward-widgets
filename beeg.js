@@ -4,7 +4,8 @@
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const SITE = 'https://beeg.com';
 const API_BASE = 'https://store.externulls.com';
-const PAGE_SIZE = 48;
+const PAGE_SIZE = 24;
+const SEARCH_SCAN_PAGES = 3;
 
 const CHANNELS = [
     { title: 'Blacked', value: 'blacked' },
@@ -257,6 +258,8 @@ function buildItem(video) {
     const duration = formatDuration(video.file && video.file.fl_duration);
     const poster = buildPoster(fileId, video);
     const tags = Array.isArray(video.tags) ? video.tags.map((tag) => tag.tg_name).filter(Boolean) : [];
+    const streams = hlsResourcesToStreams(video.file && video.file.hls_resources);
+    const link = buildLinkPayload(fileId, streams);
 
     return {
         id: String(fileId),
@@ -265,9 +268,14 @@ function buildItem(video) {
         title: title,
         posterPath: poster,
         backdropPath: poster,
-        link: String(fileId),
+        link: link,
+        videoUrl: streams.length ? streams[0].url : undefined,
         durationText: duration,
         description: [height ? height + 'p' : '', tags.slice(0, 3).join(' / ')].filter(Boolean).join(' · '),
+        customHeaders: {
+            'User-Agent': UA,
+            'Referer': SITE + '/',
+        },
     };
 }
 
@@ -326,47 +334,83 @@ function hlsResourcesToStreams(hlsResources) {
     return streams;
 }
 
-async function fetchFile(fileId) {
-    let id = String(fileId || '').replace(/^-0/, '');
-    if (!id) throw new Error('fileId 为空');
-    return httpGetJson(API_BASE + '/facts/file/' + encodeURIComponent(id));
+function buildLinkPayload(fileId, streams) {
+    if (!streams || !streams.length) return String(fileId);
+    return JSON.stringify({
+        fileId: String(fileId),
+        streams: streams,
+    });
 }
 
-async function resolveStreams(fileId) {
-    const data = await fetchFile(fileId);
-    const hlsResources = data && data.file && data.file.hls_resources;
-    const streams = hlsResourcesToStreams(hlsResources);
-    if (!streams.length) throw new Error('未找到播放资源');
-    return streams.map((stream) => ({
-        name: stream.name,
+function parseLinkPayload(value) {
+    if (!value) return { fileId: '' };
+    if (typeof value !== 'string') return value;
+    if (value[0] !== '{') return { fileId: value };
+
+    try {
+        const parsed = JSON.parse(value);
+        return parsed || { fileId: value };
+    } catch (e) {
+        return { fileId: value };
+    }
+}
+
+function streamToResource(stream) {
+    return {
+        name: stream.name || 'Auto',
         url: stream.url,
         customHeaders: {
             'User-Agent': UA,
             'Referer': SITE + '/',
         },
         playerType: "system",
-    }));
+    };
+}
+
+async function fetchFile(fileId) {
+    let id = String(fileId || '').replace(/^-0/, '');
+    if (!id) throw new Error('fileId 为空');
+    return httpGetJson(API_BASE + '/facts/file/' + encodeURIComponent(id));
+}
+
+async function resolveStreams(fileId, cachedStreams) {
+    if (cachedStreams && cachedStreams.length) {
+        return cachedStreams.map(streamToResource);
+    }
+
+    const data = await fetchFile(fileId);
+    const hlsResources = data && data.file && data.file.hls_resources;
+    const streams = hlsResourcesToStreams(hlsResources);
+    if (!streams.length) throw new Error('未找到播放资源');
+    return streams.map(streamToResource);
 }
 
 async function loadDetail(link) {
     if (!link) throw new Error('link 不能为空');
     console.log('[beeg] loadDetail:', link);
 
-    const streams = await resolveStreams(link);
+    const payload = parseLinkPayload(link);
+    const streams = await resolveStreams(payload.fileId || link, payload.streams);
     return {
-        id: String(link),
+        id: String(payload.fileId || link),
         type: "url",
         mediaType: "movie",
-        link: String(link),
+        link: link,
         videoUrl: streams[0].url,
         customHeaders: streams[0].customHeaders,
     };
 }
 
 async function loadResource(params = {}) {
-    const fileId = params.link || params.id || params.video_id || params.file_id || params.videoUrl;
-    if (!fileId) throw new Error('播放资源 ID 为空');
-    return resolveStreams(fileId);
+    const raw = params.link || params.id || params.video_id || params.file_id || params.videoUrl;
+    if (!raw) throw new Error('播放资源 ID 为空');
+
+    if (/^https?:\/\//.test(raw)) {
+        return [streamToResource({ name: params.title || params.name || 'Auto', url: raw })];
+    }
+
+    const payload = parseLinkPayload(raw);
+    return resolveStreams(payload.fileId || raw, payload.streams);
 }
 
 function normalizeText(text) {
@@ -392,9 +436,8 @@ async function search(params = {}) {
     const words = splitQueryWords(kw);
     const items = [];
     const seen = {};
-    const pagesPerSearchPage = 5;
-    const startPage = (page - 1) * pagesPerSearchPage + 1;
-    const endPage = startPage + pagesPerSearchPage - 1;
+    const startPage = (page - 1) * SEARCH_SCAN_PAGES + 1;
+    const endPage = startPage + SEARCH_SCAN_PAGES - 1;
 
     for (let currentPage = startPage; currentPage <= endPage && items.length < PAGE_SIZE; currentPage++) {
         const videos = await fetchVideos('index', currentPage);
