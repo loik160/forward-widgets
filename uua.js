@@ -40,7 +40,7 @@ var WidgetMetadata = {
     description: "UAA 有爱爱视频，支持分类、标签与搜索",
     author: "夢 (XPTV转换)",
     site: SITE,
-    version: "1.0.1",
+    version: "1.0.2",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -50,18 +50,20 @@ var WidgetMetadata = {
             params: [
                 { name: "keyword", title: "关键词", type: "input" },
                 { name: "page", title: "页码", type: "page" },
+                { name: "cookie", title: "Cloudflare Cookie", type: "input" },
             ],
         },
-        { title: "国产视频", functionName: "getChinese", params: [{ name: "page", title: "页码", type: "page" }] },
-        { title: "日本AV", functionName: "getJav", params: [{ name: "page", title: "页码", type: "page" }] },
-        { title: "无码流出", functionName: "getUncensored", params: [{ name: "page", title: "页码", type: "page" }] },
-        { title: "H动漫", functionName: "getAnime", params: [{ name: "page", title: "页码", type: "page" }] },
+        { title: "国产视频", functionName: "getChinese", params: [{ name: "page", title: "页码", type: "page" }, { name: "cookie", title: "Cloudflare Cookie", type: "input" }] },
+        { title: "日本AV", functionName: "getJav", params: [{ name: "page", title: "页码", type: "page" }, { name: "cookie", title: "Cloudflare Cookie", type: "input" }] },
+        { title: "无码流出", functionName: "getUncensored", params: [{ name: "page", title: "页码", type: "page" }, { name: "cookie", title: "Cloudflare Cookie", type: "input" }] },
+        { title: "H动漫", functionName: "getAnime", params: [{ name: "page", title: "页码", type: "page" }, { name: "cookie", title: "Cloudflare Cookie", type: "input" }] },
         {
             title: "分类",
             functionName: "getCategory",
             params: [
                 { name: "category", title: "分类", type: "enumeration", enumOptions: CATEGORY_OPTIONS, value: "chinese" },
                 { name: "page", title: "页码", type: "page" },
+                { name: "cookie", title: "Cloudflare Cookie", type: "input" },
             ],
         },
         {
@@ -76,6 +78,7 @@ var WidgetMetadata = {
                     { title: "H动漫", value: "3" },
                 ], value: "" },
                 { name: "page", title: "页码", type: "page" },
+                { name: "cookie", title: "Cloudflare Cookie", type: "input" },
             ],
         },
         { id: "loadResource", title: "播放资源", functionName: "loadResource", type: "stream", cacheDuration: 0, params: [] },
@@ -86,6 +89,7 @@ var WidgetMetadata = {
         params: [
             { name: "keyword", title: "关键词", type: "input" },
             { name: "page", title: "页码", type: "page" },
+            { name: "cookie", title: "Cloudflare Cookie", type: "input" },
         ],
     },
 };
@@ -134,14 +138,41 @@ function buildListUrl(options, page) {
     return SITE + '/video/list?' + joinParams(params);
 }
 
-async function httpGet(url, referer) {
+function cleanCookie(cookie) {
+    return String(cookie || '').trim();
+}
+
+function requestHeaders(referer, cookie) {
+    const headers = {
+        'User-Agent': UA,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Referer': referer || SITE + '/',
+    };
+    cookie = cleanCookie(cookie);
+    if (cookie) headers.Cookie = cookie;
+    return headers;
+}
+
+function buildLinkPayload(url, cookie) {
+    cookie = cleanCookie(cookie);
+    if (!cookie) return url;
+    return JSON.stringify({ url: url, cookie: cookie });
+}
+
+function parseLinkPayload(value) {
+    if (!value || typeof value !== 'string' || value[0] !== '{') return { url: value, cookie: '' };
+    try {
+        const data = JSON.parse(value);
+        return { url: data.url || data.link || value, cookie: data.cookie || '' };
+    } catch (e) {
+        return { url: value, cookie: '' };
+    }
+}
+
+async function httpGet(url, referer, cookie) {
     const response = await Widget.http.get(url, {
-        headers: {
-            'User-Agent': UA,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Referer': referer || SITE + '/',
-        },
+        headers: requestHeaders(referer, cookie),
     });
     if (!response || !response.data) throw new Error('请求失败: ' + url);
     return response.data;
@@ -153,7 +184,7 @@ function assertNotBlocked(html) {
     }
 }
 
-function parseList(html) {
+function parseList(html, cookie) {
     const $ = Widget.html.load(html);
     const items = [];
     const seen = {};
@@ -173,24 +204,22 @@ function parseList(html) {
         const pubdate = $el.find('span').first().text().trim();
         const remark = $el.find('.duration, .time, .label').first().text().trim();
         const link = absoluteUrl(href);
+        const payload = buildLinkPayload(link, cookie);
 
         if (!href || !title || seen[link]) return;
         seen[link] = true;
 
         items.push({
-            id: link,
+            id: payload,
             type: "url",
             mediaType: "movie",
             title: title,
             posterPath: absoluteUrl(cover),
             backdropPath: absoluteUrl(cover),
-            link: link,
+            link: payload,
             releaseDate: pubdate,
             description: remark || pubdate,
-            customHeaders: {
-                'User-Agent': UA,
-                'Referer': SITE + '/',
-            },
+            customHeaders: requestHeaders(SITE + '/', cookie),
         });
     });
 
@@ -202,16 +231,17 @@ function parseList(html) {
             const title = $a.text().trim() || $a.attr('title') || $container.find('img').attr('alt') || '';
             const cover = $container.find('img').attr('data-src') || $container.find('img').attr('data-original') || $container.find('img').attr('src') || '';
             const link = absoluteUrl(href);
+            const payload = buildLinkPayload(link, cookie);
             if (!href || !title || seen[link]) return;
             seen[link] = true;
             items.push({
-                id: link,
+                id: payload,
                 type: "url",
                 mediaType: "movie",
                 title: title,
                 posterPath: absoluteUrl(cover),
                 backdropPath: absoluteUrl(cover),
-                link: link,
+                link: payload,
             });
         });
     }
@@ -220,25 +250,25 @@ function parseList(html) {
     return items;
 }
 
-async function fetchList(options, page) {
+async function fetchList(options, page, cookie) {
     const url = buildListUrl(options, page);
     console.log('[uaa] fetchList:', url);
-    const html = await httpGet(url);
+    const html = await httpGet(url, SITE + '/', cookie);
     assertNotBlocked(html);
-    const items = parseList(html);
+    const items = parseList(html, cookie);
     if (!items.length) throw new Error('视频列表为空，网站结构可能已更新');
     return items;
 }
 
-async function getChinese(params = {}) { return fetchList(CATEGORY_MAP.chinese, params.page || 1); }
-async function getJav(params = {}) { return fetchList(CATEGORY_MAP.jav, params.page || 1); }
-async function getUncensored(params = {}) { return fetchList(CATEGORY_MAP.uncensored, params.page || 1); }
-async function getAnime(params = {}) { return fetchList(CATEGORY_MAP.anime, params.page || 1); }
+async function getChinese(params = {}) { return fetchList(CATEGORY_MAP.chinese, params.page || 1, params.cookie); }
+async function getJav(params = {}) { return fetchList(CATEGORY_MAP.jav, params.page || 1, params.cookie); }
+async function getUncensored(params = {}) { return fetchList(CATEGORY_MAP.uncensored, params.page || 1, params.cookie); }
+async function getAnime(params = {}) { return fetchList(CATEGORY_MAP.anime, params.page || 1, params.cookie); }
 
 async function getCategory(params = {}) {
     const key = params.category || 'chinese';
     const category = CATEGORY_MAP[key] || CATEGORY_MAP.chinese;
-    return fetchList(category, params.page || 1);
+    return fetchList(category, params.page || 1, params.cookie);
 }
 
 async function getTag(params = {}) {
@@ -247,7 +277,7 @@ async function getTag(params = {}) {
         tag: tag,
         origin: params.origin || '',
         sort: 1,
-    }, params.page || 1);
+    }, params.page || 1, params.cookie);
 }
 
 function extractVideoUrl(html) {
@@ -278,22 +308,19 @@ async function loadDetail(link) {
     if (!link) throw new Error('link 不能为空');
     console.log('[uaa] loadDetail:', link);
 
-    const html = await httpGet(link, SITE + '/');
+    const payload = parseLinkPayload(link);
+    const html = await httpGet(payload.url, SITE + '/', payload.cookie);
     assertNotBlocked(html);
     const videoUrl = extractVideoUrl(html);
     if (!videoUrl) throw new Error('未找到播放地址，页面结构可能已更新');
 
     return {
-        id: link,
+        id: payload.url,
         type: "url",
         mediaType: "movie",
         link: link,
         videoUrl: videoUrl,
-        customHeaders: {
-            'User-Agent': UA,
-            'Referer': link,
-            'Origin': SITE,
-        },
+        customHeaders: Object.assign(requestHeaders(payload.url, payload.cookie), { 'Origin': SITE }),
     };
 }
 
@@ -301,15 +328,14 @@ async function loadResource(params = {}) {
     const raw = params.link || params.videoUrl || params.url || params.id;
     if (!raw) throw new Error('播放地址为空');
 
-    if (/^https?:\/\/[^"']+\.(?:m3u8|mp4)/i.test(raw)) {
+    const payload = parseLinkPayload(raw);
+    const directUrl = payload.url || raw;
+
+    if (/^https?:\/\/[^"']+\.(?:m3u8|mp4)/i.test(directUrl)) {
         return [{
             name: params.title || params.name || '播放',
-            url: raw,
-            customHeaders: {
-                'User-Agent': UA,
-                'Referer': params.referer || SITE + '/',
-                'Origin': SITE,
-            },
+            url: directUrl,
+            customHeaders: Object.assign(requestHeaders(params.referer || SITE + '/', payload.cookie || params.cookie), { 'Origin': SITE }),
             playerType: "system",
         }];
     }
@@ -333,9 +359,9 @@ async function search(params = {}) {
         : SITE + '/video/list?searchType=1&keyword=' + encodeURIComponent(kw);
 
     console.log('[uaa] search:', url);
-    const html = await httpGet(url);
+    const html = await httpGet(url, SITE + '/', params.cookie);
     assertNotBlocked(html);
-    const items = parseList(html);
+    const items = parseList(html, params.cookie);
     if (!items.length) throw new Error('搜索结果为空');
     return items;
 }
