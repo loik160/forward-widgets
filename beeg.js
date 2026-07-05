@@ -4,8 +4,11 @@
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const SITE = 'https://beeg.com';
 const API_BASE = 'https://store.externulls.com';
+const SEARCH_WS = 'wss://search.externulls.com';
 const PAGE_SIZE = 24;
 const SEARCH_SCAN_PAGES = 3;
+const SEARCH_TAG_LIMIT = 8;
+const SEARCH_TAG_FETCH_LIMIT = 4;
 
 const CHANNELS = [
     { title: 'Blacked', value: 'blacked' },
@@ -180,7 +183,7 @@ var WidgetMetadata = {
     description: "Beeg 视频资源，支持首页、频道、模特与搜索",
     author: "John Smith (XPTV转换)",
     site: SITE,
-    version: "1.0.3",
+    version: "1.0.4",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -523,6 +526,121 @@ function titleMatchesQuery(title, words) {
     return words.every((word) => normalized.includes(word));
 }
 
+function withTimeout(fn, ms) {
+    return new Promise((resolve, reject) => {
+        let cleanup = null;
+        const timer = setTimeout(() => {
+            if (cleanup) cleanup();
+            reject(new Error('搜索超时'));
+        }, ms);
+        fn(
+            (value) => {
+                clearTimeout(timer);
+                if (cleanup) cleanup();
+                resolve(value);
+            },
+            (error) => {
+                clearTimeout(timer);
+                if (cleanup) cleanup();
+                reject(error);
+            },
+            (fnCleanup) => {
+                cleanup = fnCleanup;
+            }
+        );
+    });
+}
+
+async function fetchSearchTags(keyword, page) {
+    if (typeof WebSocket !== 'function') return [];
+
+    const offset = Math.max(0, (parseInt(page, 10) || 1) - 1) * SEARCH_TAG_LIMIT;
+    const message = {
+        type: 'search',
+        ignore_stats: true,
+        payload: {
+            Search_string: keyword,
+            offset: offset,
+            limit: SEARCH_TAG_LIMIT,
+        },
+    };
+
+    return withTimeout((resolve, reject, setCleanup) => {
+        const socket = new WebSocket(SEARCH_WS);
+        setCleanup(() => {
+            try { socket.close(); } catch (e) {}
+        });
+
+        socket.onopen = () => socket.send(JSON.stringify(message));
+        socket.onerror = (event) => {
+            reject(new Error('搜索连接失败'));
+        };
+        socket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(String(event.data || '[]'));
+                resolve(Array.isArray(data) ? data : []);
+            } catch (e) {
+                reject(e);
+            }
+        };
+    }, 8000);
+}
+
+function scoreSearchTag(tag, words) {
+    const name = String(tag.tg_name || '').toLowerCase();
+    const slug = String(tag.tg_slug || '').toLowerCase();
+    if (!words.length) return 1;
+
+    let score = 0;
+    for (const word of words) {
+        if (name === word || slug === word) score += 6;
+        else if (name.indexOf(word) !== -1 || slug.indexOf(word) !== -1) score += 3;
+    }
+    score += Math.min(Number(tag.tg_videos_count) || 0, 1000) / 1000;
+    return score;
+}
+
+async function searchByTags(keyword, page) {
+    const words = splitQueryWords(keyword);
+    const tags = await fetchSearchTags(keyword, page);
+    const slugs = [];
+    const seenSlugs = {};
+
+    tags
+        .filter((tag) => tag && tag.tg_slug && Number(tag.tg_videos_count || 0) > 0)
+        .sort((a, b) => scoreSearchTag(b, words) - scoreSearchTag(a, words))
+        .forEach((tag) => {
+            const slug = String(tag.tg_slug);
+            const key = normalizeText(slug);
+            if (!seenSlugs[key]) {
+                seenSlugs[key] = true;
+                slugs.push(slug);
+            }
+        });
+
+    if (!slugs.length) return [];
+
+    const results = await Promise.all(slugs.slice(0, SEARCH_TAG_FETCH_LIMIT).map((slug) => {
+        return fetchVideos(slug, page).catch((error) => {
+            console.log('[beeg] search tag error:', slug, error.message);
+            return [];
+        });
+    }));
+
+    const items = [];
+    const seenItems = {};
+    for (const list of results) {
+        for (const item of list) {
+            if (seenItems[item.id]) continue;
+            seenItems[item.id] = true;
+            items.push(item);
+            if (items.length >= PAGE_SIZE) return items;
+        }
+    }
+
+    return items;
+}
+
 function findSearchTag(keyword) {
     const normalized = normalizeText(keyword);
     if (!normalized) return null;
@@ -544,10 +662,15 @@ async function search(params = {}) {
     const page = parseInt(params.page, 10) || 1;
     if (!kw) throw new Error('关键词为空');
 
-    const tagSlug = findSearchTag(kw);
-    if (tagSlug) {
-        return fetchVideos(tagSlug, page);
+    try {
+        const tagItems = await searchByTags(kw, page);
+        if (tagItems.length) return tagItems;
+    } catch (error) {
+        console.log('[beeg] websocket search error:', error.message);
     }
+
+    const tagSlug = findSearchTag(kw);
+    if (tagSlug) return fetchVideos(tagSlug, page);
 
     const words = splitQueryWords(kw);
     const items = [];
