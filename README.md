@@ -21,6 +21,7 @@ https://raw.githubusercontent.com/loik160/forward-widgets/main/widgets.fwd
 | Beeg | `beeg.com` | 1.0.5 | Beeg 视频资源 |
 | KBJFan | `kbjfan.com` | 1.0.0 | Korean BJ Dance / Nude |
 | 有爱爱 | `uaa.com` | 1.0.0 | UAA 分类、标签与搜索 |
+| exporntoons | `exporntoons.net` | 1.0.0 | ExPornToons 搜索 |
 
 ## 说明
 

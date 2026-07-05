@@ -83,6 +83,15 @@
       "version": "1.0.0",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/uua.js"
+    },
+    {
+      "id": "exporntoons.net",
+      "title": "exporntoons",
+      "description": "ExPornToons 动画视频，主要支持搜索",
+      "author": "fangkuia/XPTV转换",
+      "version": "1.0.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/exporntoons.js"
     }
   ]
 }
