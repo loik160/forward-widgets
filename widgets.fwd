@@ -62,7 +62,7 @@
       "title": "Beeg",
       "description": "Beeg 视频资源，支持首页、频道、模特与搜索",
       "author": "John Smith (XPTV转换)",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/beeg.js"
     },

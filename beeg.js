@@ -180,7 +180,7 @@ var WidgetMetadata = {
     description: "Beeg 视频资源，支持首页、频道、模特与搜索",
     author: "John Smith (XPTV转换)",
     site: SITE,
-    version: "1.0.2",
+    version: "1.0.3",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -510,14 +510,33 @@ function normalizeText(text) {
 }
 
 function splitQueryWords(text) {
-    return String(text || '').toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 2);
+    return String(text || '')
+        .toLowerCase()
+        .split(/[^a-z0-9\u4e00-\u9fff]+/)
+        .filter((word) => word.length >= 2);
 }
 
 function titleMatchesQuery(title, words) {
-    const normalized = normalizeText(title);
+    const normalized = String(title || '').toLowerCase();
     if (!normalized) return false;
     if (!words.length) return true;
     return words.every((word) => normalized.includes(word));
+}
+
+function findSearchTag(keyword) {
+    const normalized = normalizeText(keyword);
+    if (!normalized) return null;
+
+    const matches = CHANNELS.concat(MODELS);
+    for (const item of matches) {
+        const title = normalizeText(item.title);
+        const value = normalizeText(item.value);
+        if (title.includes(normalized) || value.includes(normalized) || normalized.includes(title) || normalized.includes(value)) {
+            return item.value;
+        }
+    }
+
+    return null;
 }
 
 async function search(params = {}) {
@@ -525,14 +544,27 @@ async function search(params = {}) {
     const page = parseInt(params.page, 10) || 1;
     if (!kw) throw new Error('关键词为空');
 
+    const tagSlug = findSearchTag(kw);
+    if (tagSlug) {
+        return fetchVideos(tagSlug, page);
+    }
+
     const words = splitQueryWords(kw);
     const items = [];
     const seen = {};
     const startPage = (page - 1) * SEARCH_SCAN_PAGES + 1;
     const endPage = startPage + SEARCH_SCAN_PAGES - 1;
+    const requests = [];
 
-    for (let currentPage = startPage; currentPage <= endPage && items.length < PAGE_SIZE; currentPage++) {
-        const videos = await fetchVideos('index', currentPage);
+    for (let currentPage = startPage; currentPage <= endPage; currentPage++) {
+        requests.push(fetchVideos('index', currentPage).catch((error) => {
+            console.log('[beeg] search page error:', currentPage, error.message);
+            return [];
+        }));
+    }
+
+    const pages = await Promise.all(requests);
+    for (const videos of pages) {
         for (const item of videos) {
             if (!seen[item.id] && titleMatchesQuery(item.title, words)) {
                 seen[item.id] = true;
@@ -540,6 +572,7 @@ async function search(params = {}) {
                 if (items.length >= PAGE_SIZE) break;
             }
         }
+        if (items.length >= PAGE_SIZE) break;
     }
 
     return items;
