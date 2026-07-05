@@ -65,6 +65,15 @@
       "version": "1.0.1",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/beeg.js"
+    },
+    {
+      "id": "twivideo.net",
+      "title": "twivideo",
+      "description": "twivideo 视频下载与排行",
+      "author": "Yswag (XPTV转换)",
+      "version": "1.0.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/twivideo.js"
     }
   ]
 }
