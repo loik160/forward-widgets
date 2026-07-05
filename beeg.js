@@ -180,7 +180,7 @@ var WidgetMetadata = {
     description: "Beeg 视频资源，支持首页、频道、模特与搜索",
     author: "John Smith (XPTV转换)",
     site: SITE,
-    version: "1.0.0",
+    version: "1.0.1",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -269,7 +269,6 @@ function buildItem(video) {
         posterPath: poster,
         backdropPath: poster,
         link: link,
-        videoUrl: streams.length ? streams[0].url : undefined,
         durationText: duration,
         description: [height ? height + 'p' : '', tags.slice(0, 3).join(' / ')].filter(Boolean).join(' · '),
         customHeaders: {
@@ -334,6 +333,86 @@ function hlsResourcesToStreams(hlsResources) {
     return streams;
 }
 
+async function httpGetText(url) {
+    const response = await Widget.http.get(url, {
+        headers: {
+            'User-Agent': UA,
+            'Origin': SITE,
+            'Referer': SITE + '/',
+        },
+    });
+    if (!response || !response.data) throw new Error('请求失败: ' + url);
+    return String(response.data);
+}
+
+function parseMasterPlaylist(masterUrl, text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const streams = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line || line.indexOf('#EXT-X-STREAM-INF') !== 0) continue;
+
+        const next = lines[i + 1] || '';
+        if (!next || next[0] === '#') continue;
+
+        const resolutionMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
+        const codecMatch = line.match(/CODECS="([^"]+)"/);
+        const height = resolutionMatch ? parseInt(resolutionMatch[2], 10) : 0;
+        const codec = codecMatch ? codecMatch[1] : '';
+
+        let url = next;
+        if (url.startsWith('/')) url = 'https://video.beeg.com' + url;
+        else if (!url.startsWith('http')) {
+            const base = masterUrl.substring(0, masterUrl.lastIndexOf('/') + 1);
+            url = base + url;
+        }
+
+        streams.push({
+            height: height,
+            codec: codec,
+            name: height ? height + 'p' : 'Auto',
+            url: url,
+        });
+    }
+
+    return streams;
+}
+
+function sortPlayableStreams(streams) {
+    const preference = { 720: 1, 480: 2, 1080: 3, 360: 4, 240: 5 };
+    return streams.sort((a, b) => {
+        const ap = preference[a.height] || 99;
+        const bp = preference[b.height] || 99;
+        if (ap !== bp) return ap - bp;
+        return (b.height || 0) - (a.height || 0);
+    });
+}
+
+async function expandMasterStreams(streams) {
+    if (!streams || !streams.length) return [];
+
+    const expanded = [];
+    for (const stream of streams) {
+        if (!stream.url || stream.url.indexOf('/multi=') === -1) {
+            expanded.push(stream);
+            continue;
+        }
+
+        try {
+            const masterText = await httpGetText(stream.url);
+            const variants = parseMasterPlaylist(stream.url, masterText);
+            const h264 = variants.filter((variant) => variant.codec.indexOf('avc1.') !== -1);
+            expanded.push.apply(expanded, h264.length ? h264 : variants);
+        } catch (e) {
+            console.log('[beeg] expandMasterStreams error:', e.message);
+            expanded.push(stream);
+        }
+    }
+
+    return sortPlayableStreams(expanded);
+}
+
 function buildLinkPayload(fileId, streams) {
     if (!streams || !streams.length) return String(fileId);
     return JSON.stringify({
@@ -374,13 +453,15 @@ async function fetchFile(fileId) {
 }
 
 async function resolveStreams(fileId, cachedStreams) {
+    let streams = [];
     if (cachedStreams && cachedStreams.length) {
-        return cachedStreams.map(streamToResource);
+        streams = await expandMasterStreams(cachedStreams);
+        if (streams.length) return streams.map(streamToResource);
     }
 
     const data = await fetchFile(fileId);
     const hlsResources = data && data.file && data.file.hls_resources;
-    const streams = hlsResourcesToStreams(hlsResources);
+    streams = await expandMasterStreams(hlsResourcesToStreams(hlsResources));
     if (!streams.length) throw new Error('未找到播放资源');
     return streams.map(streamToResource);
 }
