@@ -20,8 +20,7 @@ https://raw.githubusercontent.com/loik160/forward-widgets/main/widgets.fwd
 | 肉视频 | `rou.video` | 1.0.0 | 肉视频分类与搜索 |
 | Beeg | `beeg.com` | 1.0.5 | Beeg 视频资源 |
 | KBJFan | `kbjfan.com` | 1.0.0 | Korean BJ Dance / Nude |
-| 有爱爱 | `uaa.com` | 1.0.2 | UAA 分类、标签与搜索 |
-| exporntoons | `exporntoons.net` | 1.0.1 | ExPornToons 搜索 |
+| exporntoons | `exporntoons.net` | 1.0.2 | ExPornToons 搜索 |
 | pppPorn | `ppp.porn` | 1.0.0 | PPP.Porn 分类与搜索 |
 
 ## 说明

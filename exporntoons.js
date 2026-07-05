@@ -1,7 +1,7 @@
 // ExPornToons Forward Widget
 // 转换自 XPTV EXPORNTOONS.js
 
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const SITE = 'https://exporntoons.net';
 
 var WidgetMetadata = {
@@ -10,7 +10,7 @@ var WidgetMetadata = {
     description: "ExPornToons 动画视频，主要支持搜索",
     author: "fangkuia/XPTV转换",
     site: SITE,
-    version: "1.0.1",
+    version: "1.0.2",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -20,10 +20,9 @@ var WidgetMetadata = {
             params: [
                 { name: "keyword", title: "关键词", type: "input" },
                 { name: "page", title: "页码", type: "page" },
-                { name: "cookie", title: "Cloudflare Cookie", type: "input" },
             ],
         },
-        { title: "最新", functionName: "getLatest", params: [{ name: "page", title: "页码", type: "page" }, { name: "cookie", title: "Cloudflare Cookie", type: "input" }] },
+        { title: "最新", functionName: "getLatest", params: [{ name: "page", title: "页码", type: "page" }] },
         { id: "loadResource", title: "播放资源", functionName: "loadResource", type: "stream", cacheDuration: 0, params: [] },
     ],
     search: {
@@ -32,7 +31,6 @@ var WidgetMetadata = {
         params: [
             { name: "keyword", title: "关键词", type: "input" },
             { name: "page", title: "页码", type: "page" },
-            { name: "cookie", title: "Cloudflare Cookie", type: "input" },
         ],
     },
 };
@@ -53,6 +51,13 @@ function requestHeaders(referer, cookie) {
         'User-Agent': UA,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
         'Referer': referer || SITE + '/',
     };
     cookie = cleanCookie(cookie);
@@ -93,16 +98,7 @@ function parseList(html, cookie) {
     const items = [];
     const seen = {};
 
-    $('.item').each((_, element) => {
-        const $el = $(element);
-        const href = $el.find('.item_link').attr('href') || $el.find('a').first().attr('href') || '';
-        const title = $el.find('.title').text().trim() || $el.find('img').attr('alt') || $el.find('a').attr('title') || '';
-        const cover = $el.find('.i_img img').attr('data-src')
-            || $el.find('.i_img img').attr('src')
-            || $el.find('img').attr('data-src')
-            || $el.find('img').attr('src')
-            || '';
-        const remark = $el.find('.duration, .time, .quality').first().text().trim();
+    function pushItem(href, title, cover, remark) {
         const link = absoluteUrl(href);
         const payload = buildLinkPayload(link, cookie);
 
@@ -117,10 +113,32 @@ function parseList(html, cookie) {
             posterPath: absoluteUrl(cover),
             backdropPath: absoluteUrl(cover),
             link: payload,
-            description: remark,
+            description: remark || '',
             customHeaders: requestHeaders(SITE + '/', cookie),
         });
+    }
+
+    $('.item').each((_, element) => {
+        const $el = $(element);
+        const href = $el.find('.item_link').attr('href') || $el.find('a').first().attr('href') || '';
+        const title = $el.find('.title').text().trim() || $el.find('img').attr('alt') || $el.find('a').attr('title') || '';
+        const cover = $el.find('.i_img img').attr('data-src')
+            || $el.find('.i_img img').attr('src')
+            || $el.find('img').attr('data-src')
+            || $el.find('img').attr('src')
+            || '';
+        const remark = $el.find('.duration, .time, .quality').first().text().trim();
+        pushItem(href, title, cover, remark);
     });
+
+    if (!items.length) {
+        const re = /<div[^>]+class=["'][^"']*\bitem\b[^"']*["'][\s\S]*?<a[^>]+class=["'][^"']*\bitem_link\b[^"']*["'][^>]+href=["']([^"']+)["'][\s\S]*?<img[^>]+(?:data-src|src)=["']([^"']+)["'][^>]*(?:alt=["']([^"']*)["'])?[\s\S]*?<div[^>]+class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/g;
+        let match;
+        while ((match = re.exec(html)) !== null) {
+            const title = String(match[4] || match[3] || '').replace(/<[^>]+>/g, '').trim();
+            pushItem(match[1], title, match[2], '');
+        }
+    }
 
     console.log('[exporntoons] parseList:', items.length, 'items');
     return items;

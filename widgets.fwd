@@ -76,20 +76,11 @@
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/kbjfan.js"
     },
     {
-      "id": "uaa.com",
-      "title": "有爱爱",
-      "description": "UAA 有爱爱视频，支持分类、标签与搜索",
-      "author": "夢 (XPTV转换)",
-      "version": "1.0.2",
-      "requiredVersion": "0.0.1",
-      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/uua.js"
-    },
-    {
       "id": "exporntoons.net",
       "title": "exporntoons",
       "description": "ExPornToons 动画视频，主要支持搜索",
       "author": "fangkuia/XPTV转换",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/exporntoons.js"
     },
