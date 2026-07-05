@@ -10,6 +10,10 @@ const SEARCH_SCAN_PAGES = 3;
 const SEARCH_TAG_LIMIT = 8;
 const SEARCH_TAG_FETCH_LIMIT = 4;
 
+const SEARCH_ALIASES = {
+    octavia: ['1055460', 'OctaviaRed', 'OctaviaMay'],
+};
+
 const CHANNELS = [
     { title: 'Blacked', value: 'blacked' },
     { title: 'Vixen', value: 'vixencom' },
@@ -183,7 +187,7 @@ var WidgetMetadata = {
     description: "Beeg 视频资源，支持首页、频道、模特与搜索",
     author: "John Smith (XPTV转换)",
     site: SITE,
-    version: "1.0.4",
+    version: "1.0.5",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -657,6 +661,61 @@ function findSearchTag(keyword) {
     return null;
 }
 
+function toTitleSlug(text) {
+    return String(text || '')
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join('');
+}
+
+function keywordSlugCandidates(keyword) {
+    const normalized = normalizeText(keyword);
+    const candidates = [];
+    const seen = {};
+
+    function add(slug) {
+        slug = String(slug || '').trim();
+        if (!slug) return;
+        const key = slug.toLowerCase();
+        if (seen[key]) return;
+        seen[key] = true;
+        candidates.push(slug);
+    }
+
+    (SEARCH_ALIASES[normalized] || []).forEach(add);
+    add(toTitleSlug(keyword));
+    add(normalized);
+
+    return candidates;
+}
+
+async function searchBySlugCandidates(keyword, page) {
+    const candidates = keywordSlugCandidates(keyword).slice(0, SEARCH_TAG_FETCH_LIMIT);
+    if (!candidates.length) return [];
+
+    const results = await Promise.all(candidates.map((slug) => {
+        return fetchVideos(slug, page).catch((error) => {
+            console.log('[beeg] search candidate error:', slug, error.message);
+            return [];
+        });
+    }));
+
+    const items = [];
+    const seenItems = {};
+    for (const list of results) {
+        for (const item of list) {
+            if (seenItems[item.id]) continue;
+            seenItems[item.id] = true;
+            items.push(item);
+            if (items.length >= PAGE_SIZE) return items;
+        }
+    }
+
+    return items;
+}
+
 async function search(params = {}) {
     const kw = (params.keyword || params.wd || '').trim();
     const page = parseInt(params.page, 10) || 1;
@@ -671,6 +730,9 @@ async function search(params = {}) {
 
     const tagSlug = findSearchTag(kw);
     if (tagSlug) return fetchVideos(tagSlug, page);
+
+    const candidateItems = await searchBySlugCandidates(kw, page);
+    if (candidateItems.length) return candidateItems;
 
     const words = splitQueryWords(kw);
     const items = [];
