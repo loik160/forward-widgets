@@ -22,6 +22,7 @@ https://raw.githubusercontent.com/loik160/forward-widgets/main/widgets.fwd
 | KBJFan | `kbjfan.com` | 1.0.0 | Korean BJ Dance / Nude |
 | 有爱爱 | `uaa.com` | 1.0.2 | UAA 分类、标签与搜索 |
 | exporntoons | `exporntoons.net` | 1.0.1 | ExPornToons 搜索 |
+| pppPorn | `ppp.porn` | 1.0.0 | PPP.Porn 分类与搜索 |
 
 ## 说明
 

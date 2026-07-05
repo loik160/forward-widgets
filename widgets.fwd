@@ -92,6 +92,15 @@
       "version": "1.0.1",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/exporntoons.js"
+    },
+    {
+      "id": "ppp.porn",
+      "title": "pppPorn",
+      "description": "PPP.Porn 精选亚洲素人成人影片，支持分类与搜索",
+      "author": "夢 (XPTV转换)",
+      "version": "1.0.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/ppp.js"
     }
   ]
 }
