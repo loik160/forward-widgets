@@ -47,6 +47,15 @@
       "version": "1.0.0",
       "requiredVersion": "0.0.1",
       "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/4kav.js"
+    },
+    {
+      "id": "rou.video",
+      "title": "肉视频",
+      "description": "肉视频 - 国产AV、探花、自拍流出、OnlyFans、日本等",
+      "author": "tou tie (XPTV转换)",
+      "version": "1.0.0",
+      "requiredVersion": "0.0.1",
+      "url": "https://raw.githubusercontent.com/loik160/forward-widgets/main/rou.js"
     }
   ]
 }
