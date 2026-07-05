@@ -40,7 +40,7 @@ var WidgetMetadata = {
     description: "UAA 有爱爱视频，支持分类、标签与搜索",
     author: "夢 (XPTV转换)",
     site: SITE,
-    version: "1.0.0",
+    version: "1.0.1",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -99,7 +99,12 @@ function absoluteUrl(url) {
 
 function appendParam(params, key, value) {
     if (value === undefined || value === null || value === '') return;
-    params.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(value)));
+    const encodedKey = encodeURIComponent(key).replace('%24', '$');
+    params.push(encodedKey + '=' + encodeURIComponent(String(value)));
+}
+
+function joinParams(params) {
+    return params.filter(Boolean).join('&');
 }
 
 function buildListUrl(options, page) {
@@ -111,9 +116,9 @@ function buildListUrl(options, page) {
         if (page > 1) {
             const params = [];
             appendParam(params, 'origin', options.origin);
-            appendParam(params, 'sort', options.sort || 1);
+            appendParam(params, '$sort', options.sort || 1);
             appendParam(params, 'page', page);
-            url += '?' + params.join('&');
+            url += '?' + joinParams(params);
         }
         return url;
     }
@@ -122,9 +127,11 @@ function buildListUrl(options, page) {
     appendParam(params, 'category', options.category);
     appendParam(params, 'origin', options.origin);
     appendParam(params, 'tag', options.tag);
-    appendParam(params, 'sort', options.sort === undefined ? 1 : options.sort);
-    appendParam(params, 'page', page);
-    return SITE + '/video/list?' + params.join('&');
+    if (page > 1) {
+        appendParam(params, '$sort', options.sort === undefined ? 1 : options.sort);
+        appendParam(params, 'page', page);
+    }
+    return SITE + '/video/list?' + joinParams(params);
 }
 
 async function httpGet(url, referer) {
@@ -155,7 +162,9 @@ function parseList(html) {
         const $el = $(element);
         const href = $el.find('.title a').attr('href') || $el.find('a').first().attr('href') || '';
         const title = $el.find('.title a').text().trim() || $el.find('a').attr('title') || $el.find('img').attr('alt') || '';
-        const cover = $el.find('img.cover').attr('src')
+        const cover = $el.find('.cover').attr('src')
+            || $el.find('.cover').attr('data-cfsrc')
+            || $el.find('img.cover').attr('src')
             || $el.find('img.cover').attr('data-cfsrc')
             || $el.find('img').attr('data-src')
             || $el.find('img').attr('data-original')
