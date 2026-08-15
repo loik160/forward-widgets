@@ -85,7 +85,19 @@ function assertVideoItem(item, where) {
         "64ca9e03aa97fec013a4c341"
     );
     assert.equal(cryptoJsDecrypt(cryptoJsEncrypt("hello-krx18", "vlVbUQhkOhoSfyteyzGeeDzU0BHoeTyZ"), "vlVbUQhkOhoSfyteyzGeeDzU0BHoeTyZ"), "hello-krx18");
+    assert.equal(
+        cryptoJsDecrypt(cryptoJsEncryptHex("hello-hex", "vlVbUQhkOhoSfyteyzGeeDzU0BHoeTyZ"), "vlVbUQhkOhoSfyteyzGeeDzU0BHoeTyZ"),
+        "hello-hex"
+    );
     assert.equal(md5hex("abc"), "900150983cd24fb0d6963f7d28e17f72");
+    assert.equal(
+        cryptoJsDecrypt(
+            "53616c7465645f5f2a6164a583b3dacad7b52a53b2b9381d4ccbecc30a27d657487dd0e459368bba262cb2207e43e235c99f5418040f03267fff6689941af7818a49bad45ba6817d76976181cf976d4867e125afdb1b5b04da591aa790adeb487b98c7be776024aa74dc04760eaeec3c8c745260338cbed95c3876297f17db1781d82f82c06dc3010b77280aad839ea4956abe49de45fe54a4f3738e6bd6d55b56990abe557aaff431bfc3f346989c906556a1cb20196418098bdb4d28f5492857f0a515eb6188de44d0f012d0e39fff2132b0b4d84c4990bc91b30b2ded67716403035022a4e23239e389331ad43b65",
+            "oJwmvmVBajMaRCTklxbfjavpQO7SZpsL"
+        ).indexOf("https://m3u8-play-"),
+        0
+    );
+    assert.ok(looksLikeMedia("https://m3u8-play-240924.playkrx18.site/m3u8/tp1-rdv1/1080/abc"));
     console.log("crypto ok");
 
     const movies = await getMovies({ page: 1 });
@@ -130,10 +142,26 @@ function assertVideoItem(item, where) {
         assert.ok(r.url, "resource[" + i + "].url");
         assert.ok(r.name, "resource[" + i + "].name");
         assert.ok(r.playerType === "app" || r.playerType === "system", "playerType");
-        assert.ok(/\.(m3u8|mp4)(\?|$)|data:application\/vnd\.apple\.mpegurl/i.test(r.url), "resource[" + i + "] must be media, got " + r.url.slice(0, 100));
+        assert.ok(/\.(m3u8|mp4)(\?|$)|data:application\/vnd\.apple\.mpegurl|\/m3u8\/|m3u8-play-/i.test(r.url), "resource[" + i + "] must be media, got " + r.url.slice(0, 100));
         assert.ok(!/playkrx18\.site\/play\/|loadvid\.com\/videos\/play\/|mov18plus\.cloud\/\?v=/i.test(r.url), "resource[" + i + "] is still an embed page");
     });
     console.log("resources", resources.map((r) => r.name + " -> " + r.url.slice(0, 70)));
+
+    const later = movies[movies.length - 1];
+    const laterRes = await loadResource({ link: later.link });
+    assert.ok(laterRes.length >= 1, "later item has no resources: " + later.title);
+    laterRes.forEach((r, i) => {
+        assert.ok(/\.(m3u8|mp4)(\?|$)|data:application\/vnd\.apple\.mpegurl|\/m3u8\/|m3u8-play-/i.test(r.url), "later[" + i + "] must be media, got " + r.url.slice(0, 100));
+        assert.ok(!/playkrx18\.site\/play\/|loadvid\.com\/videos\/play\/|mov18plus\.cloud\/\?v=/i.test(r.url), "later[" + i + "] is still an embed page");
+    });
+    console.log("later", later.title, laterRes.map((r) => r.name + " -> " + r.url.slice(0, 80)));
+
+    const page2Res = await loadResource({ link: page2[0].link });
+    assert.ok(page2Res.length >= 1, "page2 item has no resources: " + page2[0].title);
+    page2Res.forEach((r, i) => {
+        assert.ok(/\.(m3u8|mp4)(\?|$)|data:application\/vnd\.apple\.mpegurl|\/m3u8\/|m3u8-play-/i.test(r.url), "page2[" + i + "] must be media, got " + r.url.slice(0, 100));
+    });
+    console.log("page2 resource", page2[0].title, page2Res.map((r) => r.url.slice(0, 80)));
 
     const dooCalls = calls.filter((c) => c.url.indexOf("/wp-json/dooplayer/v2/") !== -1);
     assert.ok(dooCalls.length >= 1, "dooplayer API was not called");

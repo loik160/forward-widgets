@@ -1,6 +1,7 @@
 // KRX18 Forward Widget
 // 站点：https://krx18.com/  （DooPlay 主题）
-// 列表/搜索走站点 HTML；播放解析 playkrx18 / loadvid 直链，不再把网页地址交给播放器。
+// 列表/搜索走站点 HTML；播放解析 playkrx18 / loadvid 直链。
+// 后半页通常没有 loadvid，必须走 playkrx18 的 HEX + MD5 签名才能拿到 m3u8。
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const SITE = 'https://krx18.com';
@@ -24,7 +25,7 @@ var WidgetMetadata = {
     description: "KRX18 情色电影 / 韩日影片，支持分类、搜索与多线路播放",
     author: "loik160",
     site: SITE,
-    version: "1.2.0",
+    version: "1.3.0",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -160,7 +161,10 @@ async function httpPostJson(url, body, referer, extraHeaders) {
 const PLAY_FILE_KEY = 'jcLycoRJT6OWjoWspgLMOZwS3aSS0lEn';
 const PLAY_USER_KEY = 'PZZ3J3LDbLT0GY7qSA5wW5vchqgpO36O';
 const PLAY_REQ_KEY = 'vlVbUQhkOhoSfyteyzGeeDzU0BHoeTyZ';
+const PLAY_RESP_KEY = 'oJwmvmVBajMaRCTklxbfjavpQO7SZpsL';
+const PLAY_MD5_SUFFIX = 'KRWN3AdgmxEMcd2vLN1ju9qKe8Feco5h';
 const PLAY_API_FALLBACK = 'https://api-play-240924.playkrx18.site/api/tp1rd';
+const PLAY_VIEW_FALLBACK = 'https://views.api9str25.cfd/view/';
 
 function md5(bytes) {
     if (typeof bytes === 'string') bytes = utf8Encode(bytes);
@@ -319,6 +323,21 @@ function aesCbcEncrypt(plain, key, iv) {
         const blk = xorBlock(padded.slice(i, i + 16), prev);
         prev = aesBlock(blk, exp, false);
         for (let j = 0; j < 16; j++) out.push(prev[j]);
+    }
+    return out;
+}
+function aesCtrDecrypt(cipher, key, counter) {
+    const exp = expandKey(key);
+    const out = [];
+    const ctr = counter.slice();
+    for (let i = 0; i < cipher.length; i += 16) {
+        const ks = aesBlock(ctr, exp, false);
+        const n = Math.min(16, cipher.length - i);
+        for (let j = 0; j < n; j++) out.push(cipher[i + j] ^ ks[j]);
+        for (let k = 15; k >= 0; k--) {
+            ctr[k] = (ctr[k] + 1) & 255;
+            if (ctr[k]) break;
+        }
     }
     return out;
 }
@@ -617,7 +636,10 @@ function pickLoadvidConfig(html) {
 
 function looksLikeMedia(url) {
     const s = String(url || '');
-    return /\.(m3u8|mp4)(\?|$)/i.test(s) || /^data:application\/vnd\.apple\.mpegurl/i.test(s);
+    return /\.(m3u8|mp4)(\?|$)/i.test(s)
+        || /^data:application\/vnd\.apple\.mpegurl/i.test(s)
+        || /\/m3u8\//i.test(s)
+        || /m3u8-play-/i.test(s);
 }
 
 function cleanMediaUrl(url) {
@@ -639,7 +661,13 @@ function maybeDecrypt(text) {
     const payload = s.split('|')[0];
     if (!payload) return s;
     if (payload.indexOf('U2FsdGVkX1') === 0 || payload.indexOf('53616c7465645f5f') === 0 || payload.indexOf('Salted__') === 0) {
-        try { return cryptoJsDecrypt(payload, PLAY_REQ_KEY); } catch (e) { return s; }
+        const keys = [PLAY_RESP_KEY, PLAY_REQ_KEY];
+        for (let i = 0; i < keys.length; i++) {
+            try {
+                const plain = cryptoJsDecrypt(payload, keys[i]);
+                if (plain && plain !== payload) return plain;
+            } catch (e) {}
+        }
     }
     return s;
 }
@@ -701,31 +729,40 @@ function playkrxPayload(idfile, iduser, hlsSupport) {
     });
 }
 
+function signPlayRequest(plain) {
+    const cipher = cryptoJsEncryptHex(plain, PLAY_REQ_KEY);
+    return cipher + '|' + md5hex(cipher + PLAY_MD5_SUFFIX);
+}
+
 async function resolvePlaykrx18(embedUrl) {
     const html = await httpGet(embedUrl, SITE + '/');
     const idfileEnc = (html.match(/idfile_enc\s*=\s*["']([^"']+)/) || [])[1];
     const idUserEnc = (html.match(/idUser_enc\s*=\s*["']([^"']+)/) || [])[1];
     const api = ((html.match(/DOMAIN_API\s*=\s*['"]([^'"]+)/) || [])[1] || PLAY_API_FALLBACK).replace(/\/$/, '');
+    const viewApi = ((html.match(/DOMAIN_API_VIEW\s*=\s*['"]([^'"]+)/) || [])[1] || PLAY_VIEW_FALLBACK).replace(/\/?$/, '/');
     if (!idfileEnc || !idUserEnc) throw new Error('playkrx18 缺少加密 ID');
 
     const idfile = cryptoJsDecrypt(idfileEnc, PLAY_FILE_KEY);
     const iduser = cryptoJsDecrypt(idUserEnc, PLAY_USER_KEY);
+    try {
+        await httpGet(viewApi + idfile, embedUrl);
+    } catch (err) {
+        console.log('[krx18] view ping skip', err.message || err);
+    }
+
     const endpoint = api + '/playiframe';
     console.log('[krx18] playiframe:', endpoint);
     const attempts = [
-        { packed: cryptoJsEncrypt(playkrxPayload(idfile, iduser, true), PLAY_REQ_KEY), as: 'form' },
+        signPlayRequest(playkrxPayload(idfile, iduser, true)),
+        signPlayRequest(playkrxPayload(idfile, iduser, false)),
     ];
     for (let i = 0; i < attempts.length; i++) {
-        const cipher = attempts[i].packed;
-        const packed = cipher + '|' + md5hex(cipher);
         try {
-            const raw = attempts[i].as === 'form'
-                ? await httpPostForm(endpoint, 'data=' + encodeURIComponent(packed), embedUrl)
-                : await httpPostJson(endpoint, { data: packed }, embedUrl);
+            const raw = await httpPostForm(endpoint, 'data=' + encodeURIComponent(attempts[i]), embedUrl);
             const media = extractMediaFromPlayResponse(raw);
             if (media) return media;
             const preview = typeof raw === 'string' ? raw.slice(0, 180) : JSON.stringify(raw).slice(0, 180);
-            console.log('[krx18] playiframe miss', attempts[i].as, preview);
+            console.log('[krx18] playiframe miss', i, preview);
         } catch (err) {
             console.log('[krx18] playiframe err', err.message || err);
         }
