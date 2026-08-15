@@ -155,6 +155,8 @@ function assertVideoItem(item, where) {
         assert.ok(!/playkrx18\.site\/play\/|loadvid\.com\/videos\/play\/|mov18plus\.cloud\/\?v=/i.test(r.url), "later[" + i + "] is still an embed page");
     });
     console.log("later", later.title, laterRes.map((r) => r.name + " -> " + r.url.slice(0, 80)));
+    assert.equal(laterRes[0].playerType, "app", "signed playkrx18 HLS should use app player for audio compatibility");
+    assert.equal(laterRes[0].customHeaders["X-Forward-Skip-Redirect-Probe"], "1", "signed HLS should skip the startup probe");
 
     const page2Res = await loadResource({ link: page2[0].link });
     assert.ok(page2Res.length >= 1, "page2 item has no resources: " + page2[0].title);
@@ -162,6 +164,7 @@ function assertVideoItem(item, where) {
         assert.ok(/\.(m3u8|mp4)(\?|$)|data:application\/vnd\.apple\.mpegurl|\/m3u8\/|m3u8-play-/i.test(r.url), "page2[" + i + "] must be media, got " + r.url.slice(0, 100));
     });
     assert.notEqual(page2Res[0].url, laterRes[0].url, "different movies must not resolve to the same media URL");
+    assert.equal(page2Res[0].playerType, "app", "page2 playkrx18 HLS should use app player");
     console.log("page2 resource", page2[0].title, page2Res.map((r) => r.url.slice(0, 80)));
 
     const playCalls = calls.filter((c) => c.method === "POST" && c.url.indexOf("/playiframe") !== -1);
@@ -171,6 +174,7 @@ function assertVideoItem(item, where) {
         0,
         "standard playkrx18 embeds must not fetch the Cloudflare-protected player page"
     );
+    assert.equal(calls.filter((c) => /views\.api9str25\.cfd\/view\//i.test(c.url)).length, 0, "playback should not wait for the optional view ping");
 
     const dooCalls = calls.filter((c) => c.url.indexOf("/wp-json/dooplayer/v2/") !== -1);
     assert.ok(dooCalls.length >= 1, "dooplayer API was not called");
@@ -182,6 +186,14 @@ function assertVideoItem(item, where) {
     if (clip.videoUrl) {
         assert.ok(/\.(m3u8|mp4)|data:application\/vnd\.apple\.mpegurl/i.test(clip.videoUrl), "clip media url");
     }
+
+    const peopleDetail = await loadDetail("https://krx18.com/movies/sex-and-zen-3-1998/");
+    const director = peopleDetail.peoples.find((p) => p.role === "导演");
+    const actor = peopleDetail.peoples.find((p) => p.role === "演员");
+    assert.ok(director && director.id.startsWith("director:"), "director id must preserve director route");
+    assert.ok(actor && actor.id.startsWith("cast:"), "actor id must preserve cast route");
+    assert.equal(director.title, "Aman Chang Man");
+    assert.equal(actor.title, "Jane Chung Chun");
 
     console.log("✅ krx18 live ok", { calls: calls.length, movies: movies.length, resources: resources.length });
 })().catch((e) => {

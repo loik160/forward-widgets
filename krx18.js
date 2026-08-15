@@ -25,7 +25,7 @@ var WidgetMetadata = {
     description: "KRX18 情色电影 / 韩日影片，支持分类、搜索与多线路播放",
     author: "loik160",
     site: SITE,
-    version: "1.4.0",
+    version: "1.6.0",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -166,6 +166,7 @@ const PLAY_MD5_SUFFIX = 'KRWN3AdgmxEMcd2vLN1ju9qKe8Feco5h';
 const PLAY_USER_ID_FALLBACK = '64ca9e03aa97fec013a4c341';
 const PLAY_API_FALLBACK = 'https://api-play-240924.playkrx18.site/api/tp1rd';
 const PLAY_VIEW_FALLBACK = 'https://views.api9str25.cfd/view/';
+const PLAYER_OPTIONS_CACHE_MS = 5 * 60 * 1000;
 
 function md5(bytes) {
     if (typeof bytes === 'string') bytes = utf8Encode(bytes);
@@ -521,28 +522,46 @@ async function fetchList(kind, slug, page) {
     }, 2);
 }
 
-async function getMovies(params) {
+function parsePeopleRoute(peopleId) {
+    const raw = String(peopleId || '').trim();
+    const typed = raw.match(/^(cast|director):(.+)$/i);
+    if (typed) return { kind: typed[1].toLowerCase(), slug: typed[2] };
+    // Backward compatibility for people ids emitted by versions <= 1.5.0.
+    return { kind: 'cast', slug: raw };
+}
+
+async function fetchContextList(params, defaultGenre) {
     params = params || {};
+    if (params.peopleId) {
+        const route = parsePeopleRoute(params.peopleId);
+        if (route.slug) return fetchList(route.kind, route.slug, pageNum(params));
+    }
     if (params.genreId) return fetchList('genre', params.genreId, pageNum(params));
-    if (params.peopleId) return fetchList('cast', params.peopleId, pageNum(params));
+    if (defaultGenre) return fetchList('genre', defaultGenre, pageNum(params));
     return fetchList('movies', '', pageNum(params));
+}
+
+async function getMovies(params) {
+    return fetchContextList(params, '');
 }
 
 async function getGenre(params) {
     params = params || {};
+    if (params.peopleId) return fetchContextList(params, '');
     const slug = params.genreId || params.genre || GENRE_OPTIONS[0].value;
     return fetchList('genre', slug, pageNum(params));
 }
 
-async function getKorea(params) { return fetchList('genre', 'korea', pageNum(params)); }
-async function getJapan(params) { return fetchList('genre', 'japan', pageNum(params)); }
-async function getChina(params) { return fetchList('genre', 'china', pageNum(params)); }
-async function getPhilippines(params) { return fetchList('genre', 'philippines', pageNum(params)); }
-async function getEngSub(params) { return fetchList('genre', 'eng-sub', pageNum(params)); }
-async function getXxx(params) { return fetchList('genre', 'xxx', pageNum(params)); }
+async function getKorea(params) { return fetchContextList(params, 'korea'); }
+async function getJapan(params) { return fetchContextList(params, 'japan'); }
+async function getChina(params) { return fetchContextList(params, 'china'); }
+async function getPhilippines(params) { return fetchContextList(params, 'philippines'); }
+async function getEngSub(params) { return fetchContextList(params, 'eng-sub'); }
+async function getXxx(params) { return fetchContextList(params, 'xxx'); }
 
 async function search(params) {
     params = params || {};
+    if (params.peopleId || params.genreId) return fetchContextList(params, '');
     const kw = String(params.keyword || params.wd || params.text || params.s || '').trim();
     if (!kw) throw new Error('关键词为空');
     return fetchList('search', kw, pageNum(params));
@@ -741,12 +760,6 @@ function playFileIdFromUrl(embedUrl) {
 }
 
 async function requestPlaykrx18(idfile, iduser, api, viewApi, embedUrl) {
-    try {
-        await httpGet(viewApi + idfile, embedUrl);
-    } catch (err) {
-        console.log('[krx18] view ping skip', err.message || err);
-    }
-
     const endpoint = api + '/playiframe';
     console.log('[krx18] playiframe:', endpoint);
     const attempts = [
@@ -845,16 +858,47 @@ async function resolveEmbedMedia(embedUrl) {
 
 function resourceOf(name, url, referer) {
     const isData = /^data:/i.test(url);
+    const isPlaykrxHls = /m3u8-play-[^/]*\.playkrx18\.site\/m3u8\//i.test(url);
+    const headers = isData ? undefined : requestHeaders(referer || SITE + '/');
+    if (isPlaykrxHls) {
+        // This is a short-lived signed HLS URL without a .m3u8 suffix.  A
+        // preliminary redirect probe wastes time and may consume/challenge
+        // the signed request before the real player starts.
+        headers['X-Forward-Skip-Redirect-Probe'] = '1';
+    }
     return {
         name: name || '播放',
         url: url,
-        customHeaders: isData ? undefined : requestHeaders(referer || SITE + '/'),
-        playerType: isData ? 'app' : 'system',
+        customHeaders: headers,
+        playerType: (isData || isPlaykrxHls) ? 'app' : 'system',
     };
 }
 
-async function collectResourcesFromHtml(html, link) {
-    const options = extractPlayerOptions(html);
+function playerOptionsCacheKey(link) {
+    return 'player-options:' + md5hex(String(link || ''));
+}
+
+function savePlayerOptions(link, options) {
+    if (!options || !options.length || !Widget.storage || typeof Widget.storage.set !== 'function') return;
+    try {
+        Widget.storage.set(playerOptionsCacheKey(link), JSON.stringify({
+            expiresAt: Date.now() + PLAYER_OPTIONS_CACHE_MS,
+            options: options,
+        }));
+    } catch (e) {}
+}
+
+function readPlayerOptions(link) {
+    if (!Widget.storage || typeof Widget.storage.get !== 'function') return [];
+    try {
+        const raw = Widget.storage.get(playerOptionsCacheKey(link));
+        const cached = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (cached && cached.expiresAt > Date.now() && Array.isArray(cached.options)) return cached.options;
+    } catch (e) {}
+    return [];
+}
+
+async function collectResourcesFromOptions(options, link) {
     if (!options.length) throw new Error('未找到播放线路，页面结构可能已更新');
     options.sort(function (a, b) {
         const rank = function (o) { return /loadvid/i.test(String(o.server || o.name || '')) ? 0 : 1; };
@@ -900,6 +944,12 @@ async function collectResourcesFromHtml(html, link) {
     return playable;
 }
 
+async function collectResourcesFromHtml(html, link) {
+    const options = extractPlayerOptions(html);
+    savePlayerOptions(link, options);
+    return collectResourcesFromOptions(options, link);
+}
+
 function pickMovieLink(params) {
     const cands = [params && params.link, params && params.id, params && params.url, params && params.videoUrl];
     for (let i = 0; i < cands.length; i++) {
@@ -922,6 +972,11 @@ async function collectResources(link) {
 }
 
 async function collectResourcesFromHtmlWait(link) {
+    const cachedOptions = readPlayerOptions(link);
+    if (cachedOptions.length) {
+        console.log('[krx18] reuse cached player options:', cachedOptions.length);
+        return collectResourcesFromOptions(cachedOptions, link);
+    }
     const html = await httpGet(link);
     return collectResourcesFromHtml(html, link);
 }
@@ -952,15 +1007,20 @@ function parseDetailMeta(html, link) {
     }
 
     const peoples = [];
-    const peopleRe = /href="https?:\/\/krx18\.com\/(cast|director)\/([^/"]+)\/"[\s\S]{0,200}?(?:title=["']([^"']+)["']|>([\s\S]*?)<\/a>)/gi;
+    // Target the text link (`itemprop="url"`) rather than the preceding
+    // image link.  Both point to the same person, but the image link has no
+    // usable text and previously caused fragile cross-card matches.
+    const peopleRe = /<a\b[^>]*itemprop=["']url["'][^>]*href=["']https?:\/\/krx18\.com\/(cast|director)\/([^/"']+)\/["'][^>]*>([\s\S]*?)<\/a>/gi;
     let pm;
     const peopleSeen = {};
     while ((pm = peopleRe.exec(html)) !== null) {
-        const id = pm[2];
-        const name = decodeHtml(pm[3] || stripTags(pm[4] || ''));
-        if (!id || !name || peopleSeen[id] || name.length > 60) continue;
+        const kind = pm[1].toLowerCase();
+        const slug = pm[2];
+        const id = kind + ':' + slug;
+        const name = stripTags(pm[3]);
+        if (!slug || !name || peopleSeen[id] || name.length > 60) continue;
         peopleSeen[id] = true;
-        peoples.push({ id: id, title: name, role: pm[1] === 'director' ? '导演' : '演员' });
+        peoples.push({ id: id, title: name, role: kind === 'director' ? '导演' : '演员' });
     }
 
     const relatedItems = [];
@@ -990,6 +1050,7 @@ async function loadDetail(link) {
 
     const html = await httpGet(link);
     const meta = parseDetailMeta(html, link);
+    savePlayerOptions(link, extractPlayerOptions(html));
 
     return {
         id: link,
