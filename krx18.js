@@ -25,7 +25,7 @@ var WidgetMetadata = {
     description: "KRX18 情色电影 / 韩日影片，支持分类、搜索与多线路播放",
     author: "loik160",
     site: SITE,
-    version: "1.3.0",
+    version: "1.4.0",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -127,16 +127,13 @@ async function httpGet(url, referer) {
     return typeof data === 'string' ? data : String(data);
 }
 
-async function httpPostForm(url, body, referer, extraHeaders) {
+async function httpPostForm(url, body, referer) {
     return withRetry(async function () {
         const headers = requestHeaders(referer);
         headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
         headers['Accept'] = 'application/json, text/javascript, */*; q=0.01';
         headers['X-Requested-With'] = 'XMLHttpRequest';
         headers['Origin'] = (referer || url).split('/').slice(0, 3).join('/');
-        if (extraHeaders) {
-            for (const key in extraHeaders) headers[key] = extraHeaders[key];
-        }
         const response = await Widget.http.post(url, body, { headers: headers });
         if (!response || response.data == null) throw new Error('POST 失败: ' + url);
         return response.data;
@@ -166,6 +163,7 @@ const PLAY_USER_KEY = 'PZZ3J3LDbLT0GY7qSA5wW5vchqgpO36O';
 const PLAY_REQ_KEY = 'vlVbUQhkOhoSfyteyzGeeDzU0BHoeTyZ';
 const PLAY_RESP_KEY = 'oJwmvmVBajMaRCTklxbfjavpQO7SZpsL';
 const PLAY_MD5_SUFFIX = 'KRWN3AdgmxEMcd2vLN1ju9qKe8Feco5h';
+const PLAY_USER_ID_FALLBACK = '64ca9e03aa97fec013a4c341';
 const PLAY_API_FALLBACK = 'https://api-play-240924.playkrx18.site/api/tp1rd';
 const PLAY_VIEW_FALLBACK = 'https://views.api9str25.cfd/view/';
 
@@ -737,24 +735,18 @@ function signPlayRequest(plain) {
     return cipher + '|' + md5hex(cipher + PLAY_MD5_SUFFIX);
 }
 
-async function resolvePlaykrx18(embedUrl) {
-    const html = await httpGet(embedUrl, SITE + '/');
-    const idfileEnc = (html.match(/idfile_enc\s*=\s*["']([^"']+)/) || [])[1];
-    const idUserEnc = (html.match(/idUser_enc\s*=\s*["']([^"']+)/) || [])[1];
-    const api = ((html.match(/DOMAIN_API\s*=\s*['"]([^'"]+)/) || [])[1] || PLAY_API_FALLBACK).replace(/\/$/, '');
-    const viewApi = ((html.match(/DOMAIN_API_VIEW\s*=\s*['"]([^'"]+)/) || [])[1] || PLAY_VIEW_FALLBACK).replace(/\/?$/, '/');
-    if (!idfileEnc || !idUserEnc) throw new Error('playkrx18 缺少加密 ID');
+function playFileIdFromUrl(embedUrl) {
+    const match = String(embedUrl || '').match(/\/play\/([a-z0-9_-]{12,})(?:[/?#]|$)/i);
+    return match ? match[1] : '';
+}
 
-    const idfile = cryptoJsDecrypt(idfileEnc, PLAY_FILE_KEY);
-    const iduser = cryptoJsDecrypt(idUserEnc, PLAY_USER_KEY);
+async function requestPlaykrx18(idfile, iduser, api, viewApi, embedUrl) {
     try {
         await httpGet(viewApi + idfile, embedUrl);
     } catch (err) {
         console.log('[krx18] view ping skip', err.message || err);
     }
 
-    // The play API uses one endpoint for every movie.  Explicitly prohibit
-    // response reuse so a previous movie's m3u8 is never returned here.
     const endpoint = api + '/playiframe';
     console.log('[krx18] playiframe:', endpoint);
     const attempts = [
@@ -763,10 +755,7 @@ async function resolvePlaykrx18(embedUrl) {
     ];
     for (let i = 0; i < attempts.length; i++) {
         try {
-            const raw = await httpPostForm(endpoint, 'data=' + encodeURIComponent(attempts[i]), embedUrl, {
-                'Cache-Control': 'no-cache, no-store, max-age=0',
-                'Pragma': 'no-cache',
-            });
+            const raw = await httpPostForm(endpoint, 'data=' + encodeURIComponent(attempts[i]), embedUrl);
             const media = extractMediaFromPlayResponse(raw);
             if (media) return media;
             const preview = typeof raw === 'string' ? raw.slice(0, 180) : JSON.stringify(raw).slice(0, 180);
@@ -776,6 +765,40 @@ async function resolvePlaykrx18(embedUrl) {
         }
     }
     throw new Error('playkrx18 未返回直链');
+}
+
+async function resolvePlaykrx18(embedUrl) {
+    // Standard playkrx18 URLs already expose the decrypted file id in
+    // /play/<id>.  Use it directly: fetching the iframe HTML from Widget.http
+    // is unreliable because Cloudflare challenges non-browser clients.
+    const directId = playFileIdFromUrl(embedUrl);
+    if (directId) {
+        console.log('[krx18] playkrx18 direct id:', directId);
+        return requestPlaykrx18(
+            directId,
+            PLAY_USER_ID_FALLBACK,
+            PLAY_API_FALLBACK,
+            PLAY_VIEW_FALLBACK,
+            embedUrl
+        );
+    }
+
+    // Compatibility path for older/alternate embeds that do not expose the
+    // file id in their URL.
+    const html = await httpGet(embedUrl, SITE + '/');
+    const idfileEnc = (html.match(/idfile_enc\s*=\s*["']([^"']+)/) || [])[1];
+    const idUserEnc = (html.match(/idUser_enc\s*=\s*["']([^"']+)/) || [])[1];
+    const api = ((html.match(/DOMAIN_API\s*=\s*['"]([^'"]+)/) || [])[1] || PLAY_API_FALLBACK).replace(/\/$/, '');
+    const viewApi = ((html.match(/DOMAIN_API_VIEW\s*=\s*['"]([^'"]+)/) || [])[1] || PLAY_VIEW_FALLBACK).replace(/\/?$/, '/');
+    if (!idfileEnc || !idUserEnc) throw new Error('playkrx18 缺少加密 ID');
+
+    return requestPlaykrx18(
+        cryptoJsDecrypt(idfileEnc, PLAY_FILE_KEY),
+        cryptoJsDecrypt(idUserEnc, PLAY_USER_KEY),
+        api,
+        viewApi,
+        embedUrl
+    );
 }
 
 async function resolveLoadvidPlaylist(embedUrl) {
