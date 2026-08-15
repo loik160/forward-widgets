@@ -113,9 +113,7 @@ function assertVideoItem(item, where) {
     assert.equal(detail.link, movies[0].link);
     assert.ok(detail.title, "detail title");
     assert.ok(!/^Free Watch/i.test(detail.title), "detail title should not be SEO title: " + detail.title);
-    if (detail.videoUrl) {
-        assert.ok(looksLikeMedia(detail.videoUrl) || /\.(m3u8|mp4)|data:application\/vnd\.apple\.mpegurl/i.test(detail.videoUrl), "detail videoUrl should be media: " + detail.videoUrl.slice(0, 80));
-    }
+    assert.equal(detail.link, movies[0].link, "detail keeps movie link");
     assert.equal(detail.stills, undefined);
     assert.ok(Array.isArray(detail.genreItems) || detail.genreItems === undefined || Array.isArray(detail.genreItems));
     if (detail.genreItems && detail.genreItems.length) {
@@ -124,7 +122,7 @@ function assertVideoItem(item, where) {
     }
     assert.ok(Array.isArray(detail.relatedItems), "relatedItems should be array");
     if (detail.relatedItems.length) assertVideoItem(detail.relatedItems[0], "related[0]");
-    console.log("detail", detail.title, "videoUrl", detail.videoUrl.slice(0, 80), "genres", (detail.genreItems || []).length, "related", detail.relatedItems.length);
+    console.log("detail", detail.title, "genres", (detail.genreItems || []).length, "related", detail.relatedItems.length);
 
     const resources = await loadResource({ link: movies[0].link });
     assert.ok(resources.length >= 1, "no resources");

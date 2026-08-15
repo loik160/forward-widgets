@@ -24,7 +24,7 @@ var WidgetMetadata = {
     description: "KRX18 情色电影 / 韩日影片，支持分类、搜索与多线路播放",
     author: "loik160",
     site: SITE,
-    version: "1.1.0",
+    version: "1.2.0",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -77,16 +77,48 @@ function pageNum(params) {
 }
 
 function isChallenge(html) {
-    return typeof html === 'string' && html.indexOf('Just a moment') !== -1 && html.length < 20000;
+    if (typeof html !== 'string') return false;
+    return (html.indexOf('Just a moment') !== -1 || html.indexOf('challenge-platform') !== -1 || html.indexOf('cf-mitigated') !== -1)
+        && html.length < 20000;
+}
+
+function sleep(ms) {
+    return new Promise(function (resolve) {
+        if (typeof setTimeout === 'function') setTimeout(resolve, ms);
+        else resolve();
+    });
+}
+
+function isTransientError(err) {
+    const msg = String(err && err.message ? err.message : err || '');
+    return /Cloudflare|超时|timeout|失败|ECONN|ENOTFOUND|429|502|503|520|521|522|524/i.test(msg);
+}
+
+async function withRetry(fn, times) {
+    times = times || 3;
+    let last = null;
+    for (let i = 0; i < times; i++) {
+        try {
+            return await fn();
+        } catch (err) {
+            last = err;
+            console.log('[krx18] retry', i + 1, '/', times, err.message || err);
+            if (i < times - 1 && isTransientError(err)) await sleep(250 * (i + 1));
+            else if (i < times - 1) await sleep(150);
+        }
+    }
+    throw last;
 }
 
 async function httpGetRaw(url, referer) {
-    const response = await Widget.http.get(url, { headers: requestHeaders(referer) });
-    if (!response || response.data == null) throw new Error('请求失败: ' + url);
-    if (typeof response.data === 'string' && isChallenge(response.data)) {
-        throw new Error('Cloudflare 验证拦截，请稍后重试');
-    }
-    return response.data;
+    return withRetry(async function () {
+        const response = await Widget.http.get(url, { headers: requestHeaders(referer) });
+        if (!response || response.data == null) throw new Error('请求失败: ' + url);
+        if (typeof response.data === 'string' && isChallenge(response.data)) {
+            throw new Error('Cloudflare 验证拦截，请稍后重试');
+        }
+        return response.data;
+    });
 }
 
 async function httpGet(url, referer) {
@@ -95,27 +127,34 @@ async function httpGet(url, referer) {
 }
 
 async function httpPostForm(url, body, referer) {
-    const headers = requestHeaders(referer);
-    headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
-    headers['Accept'] = 'application/json, text/javascript, */*; q=0.01';
-    headers['X-Requested-With'] = 'XMLHttpRequest';
-    headers['Origin'] = (referer || url).split('/').slice(0, 3).join('/');
-    const response = await Widget.http.post(url, body, { headers: headers });
-    if (!response || response.data == null) throw new Error('POST 失败: ' + url);
-    return response.data;
+    return withRetry(async function () {
+        const headers = requestHeaders(referer);
+        headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+        headers['Accept'] = 'application/json, text/javascript, */*; q=0.01';
+        headers['X-Requested-With'] = 'XMLHttpRequest';
+        headers['Origin'] = (referer || url).split('/').slice(0, 3).join('/');
+        const response = await Widget.http.post(url, body, { headers: headers });
+        if (!response || response.data == null) throw new Error('POST 失败: ' + url);
+        return response.data;
+    }, 2);
 }
 
 async function httpPostJson(url, body, referer, extraHeaders) {
-    const headers = requestHeaders(referer);
-    headers['Content-Type'] = 'application/json';
-    headers['Accept'] = 'application/json, application/vnd.apple.mpegurl, */*';
-    headers['Origin'] = (referer || url).split('/').slice(0, 3).join('/');
-    if (extraHeaders) {
-        for (const key in extraHeaders) headers[key] = extraHeaders[key];
-    }
-    const response = await Widget.http.post(url, JSON.stringify(body), { headers: headers });
-    if (!response || response.data == null) throw new Error('POST 失败: ' + url);
-    return response.data;
+    return withRetry(async function () {
+        const headers = requestHeaders(referer);
+        headers['Content-Type'] = 'application/json';
+        headers['Accept'] = 'application/json, application/vnd.apple.mpegurl, */*';
+        headers['Origin'] = (referer || url).split('/').slice(0, 3).join('/');
+        if (extraHeaders) {
+            for (const key in extraHeaders) headers[key] = extraHeaders[key];
+        }
+        const response = await Widget.http.post(url, JSON.stringify(body), { headers: headers });
+        if (!response || response.data == null) throw new Error('POST 失败: ' + url);
+        if (typeof response.data === 'string' && isChallenge(response.data)) {
+            throw new Error('Cloudflare 验证拦截，请稍后重试');
+        }
+        return response.data;
+    }, 2);
 }
 
 const PLAY_FILE_KEY = 'jcLycoRJT6OWjoWspgLMOZwS3aSS0lEn';
@@ -454,10 +493,12 @@ function listUrl(kind, slug, page) {
 async function fetchList(kind, slug, page) {
     const url = listUrl(kind, slug, page);
     console.log('[krx18] fetchList:', url);
-    const html = await httpGet(url);
-    const items = parseList(html);
-    if (!items.length) throw new Error('视频列表为空，网站结构可能已更新');
-    return items;
+    return withRetry(async function () {
+        const html = await httpGet(url);
+        const items = parseList(html);
+        if (!items.length) throw new Error('视频列表为空，网站结构可能已更新');
+        return items;
+    }, 2);
 }
 
 async function getMovies(params) {
@@ -499,24 +540,37 @@ function extractPostId(html, link) {
 
 function extractPlayerOptions(html) {
     const options = [];
-    const re = /<li[^>]*class=['"][^'"]*dooplay_player_option[^'"]*['"][^>]*data-type=['"]([^'"]+)['"][^>]*data-post=['"](\d+)['"][^>]*data-nume=['"](\d+)['"][^>]*>([\s\S]*?)<\/li>/gi;
+    const seen = {};
+    const re = /<li([^>]*class=['"][^'"]*dooplay_player_option[^'"]*['"][^>]*)>([\s\S]*?)<\/li>/gi;
     let match;
     while ((match = re.exec(html)) !== null) {
-        const label = stripTags((match[4].match(/class=['"]title['"][^>]*>([\s\S]*?)<\/span>/i) || [])[1] || '');
-        const server = stripTags((match[4].match(/class=['"]server['"][^>]*>([\s\S]*?)<\/span>/i) || [])[1] || '');
+        const attrs = match[1] + ' ' + match[2];
+        const type = ((attrs.match(/data-type=['"]([^'"]+)['"]/i) || [])[1] || 'movie');
+        const post = ((attrs.match(/data-post=['"](\d+)['"]/i) || [])[1] || '');
+        const nume = ((attrs.match(/data-nume=['"](\d+)['"]/i) || [])[1] || '');
+        if (!post || !nume) continue;
+        const key = type + ':' + post + ':' + nume;
+        if (seen[key]) continue;
+        seen[key] = true;
         options.push({
-            type: match[1],
-            post: match[2],
-            nume: match[3],
-            name: label || ('Server ' + match[3]),
-            server: server,
+            type: type,
+            post: post,
+            nume: nume,
+            name: stripTags((match[2].match(/class=['"]title['"][^>]*>([\s\S]*?)<\/span>/i) || [])[1] || '') || ('Server ' + nume),
+            server: stripTags((match[2].match(/class=['"]server['"][^>]*>([\s\S]*?)<\/span>/i) || [])[1] || ''),
         });
     }
     if (!options.length) {
-        const loose = /data-type=['"]([^'"]+)['"][^>]*data-post=['"](\d+)['"][^>]*data-nume=['"](\d+)['"]/gi;
+        const loose = /data-post=['"](\d+)['"][^>]*data-nume=['"](\d+)['"][^>]*data-type=['"]([^'"]+)['"]|data-type=['"]([^'"]+)['"][^>]*data-post=['"](\d+)['"][^>]*data-nume=['"](\d+)['"]/gi;
         let m;
         while ((m = loose.exec(html)) !== null) {
-            options.push({ type: m[1], post: m[2], nume: m[3], name: 'Server ' + m[3], server: '' });
+            const type = m[3] || m[4] || 'movie';
+            const post = m[1] || m[5];
+            const nume = m[2] || m[6];
+            const key = type + ':' + post + ':' + nume;
+            if (!post || !nume || seen[key]) continue;
+            seen[key] = true;
+            options.push({ type: type, post: post, nume: nume, name: 'Server ' + nume, server: '' });
         }
     }
     return options;
@@ -660,7 +714,6 @@ async function resolvePlaykrx18(embedUrl) {
     console.log('[krx18] playiframe:', endpoint);
     const attempts = [
         { packed: cryptoJsEncrypt(playkrxPayload(idfile, iduser, true), PLAY_REQ_KEY), as: 'form' },
-        { packed: cryptoJsEncryptHex(playkrxPayload(idfile, iduser, true), PLAY_REQ_KEY), as: 'form' },
     ];
     for (let i = 0; i < attempts.length; i++) {
         const cipher = attempts[i].packed;
@@ -681,24 +734,26 @@ async function resolvePlaykrx18(embedUrl) {
 }
 
 async function resolveLoadvidPlaylist(embedUrl) {
-    const html = await httpGet(embedUrl, SITE + '/');
-    const cfg = pickLoadvidConfig(html);
-    if (!cfg.hash || !cfg.token) throw new Error('loadvid 页面缺少 token');
-    const origin = embedUrl.split('/').slice(0, 3).join('/');
-    const raw = await httpPostJson(origin + '/videos/resolve-token', {
-        token: cfg.token,
-        hash: cfg.hash,
-    }, embedUrl, {
-        'X-CSRF-TOKEN': pickCsrf(html),
-        'Accept': 'application/vnd.apple.mpegurl,*/*',
-    });
-    const text = typeof raw === 'string' ? raw : String(raw || '');
-    if (text.indexOf('#EXTM3U') === -1) throw new Error('loadvid 未返回 m3u8');
-    const direct = findMediaUrl(text);
-    return {
-        url: direct || ('data:application/vnd.apple.mpegurl;base64,' + b64enc(utf8Encode(text))),
-        playlist: text,
-    };
+    return withRetry(async function () {
+        const html = await httpGet(embedUrl, SITE + '/');
+        const cfg = pickLoadvidConfig(html);
+        if (!cfg.hash || !cfg.token) throw new Error('loadvid 页面缺少 token');
+        const origin = embedUrl.split('/').slice(0, 3).join('/');
+        const raw = await httpPostJson(origin + '/videos/resolve-token', {
+            token: cfg.token,
+            hash: cfg.hash,
+        }, embedUrl, {
+            'X-CSRF-TOKEN': pickCsrf(html),
+            'Accept': 'application/vnd.apple.mpegurl,*/*',
+        });
+        const text = typeof raw === 'string' ? raw : String(raw || '');
+        if (text.indexOf('#EXTM3U') === -1) throw new Error('loadvid 未返回 m3u8');
+        const direct = findMediaUrl(text);
+        return {
+            url: direct || ('data:application/vnd.apple.mpegurl;base64,' + b64enc(utf8Encode(text))),
+            playlist: text,
+        };
+    }, 3);
 }
 
 async function resolveEmbedMedia(embedUrl) {
@@ -706,12 +761,12 @@ async function resolveEmbedMedia(embedUrl) {
     const leaked = findMediaUrl(embedUrl);
     if (leaked) return leaked;
 
-    if (/playkrx18\.site/i.test(embedUrl)) {
-        return resolvePlaykrx18(embedUrl);
-    }
     if (/loadvid\.com/i.test(embedUrl)) {
         const resolved = await resolveLoadvidPlaylist(embedUrl);
         return resolved.url;
+    }
+    if (/playkrx18\.site/i.test(embedUrl)) {
+        return resolvePlaykrx18(embedUrl);
     }
 
     const html = await httpGet(embedUrl, SITE + '/');
@@ -740,19 +795,36 @@ async function collectResourcesFromHtml(html, link) {
 
     const resources = [];
     const seen = {};
+    const preferred = [];
+    const fallback = [];
     for (let i = 0; i < options.length; i++) {
+        if (/loadvid/i.test(String(options[i].server || options[i].name || ''))) preferred.push(options[i]);
+        else fallback.push(options[i]);
+    }
+    const queue = preferred.concat(fallback);
+
+    async function addFromOption(option) {
+        const embed = await fetchEmbed(option);
+        if (!embed.embed || seen[embed.embed]) return;
+        seen[embed.embed] = true;
+        if (/playkrx18\.site/i.test(embed.embed) && resources.length) {
+            console.log('[krx18] skip playkrx18, already have a stream');
+            return;
+        }
+        const media = await resolveEmbedMedia(embed.embed);
+        if (!media || seen[media]) return;
+        seen[media] = true;
+        const item = resourceOf(embed.name, media, embed.embed);
+        if (looksLikeMedia(media) && media.indexOf('data:') !== 0) resources.unshift(item);
+        else resources.push(item);
+    }
+
+    for (let i = 0; i < queue.length; i++) {
         try {
-            const embed = await fetchEmbed(options[i]);
-            if (!embed.embed || seen[embed.embed]) continue;
-            seen[embed.embed] = true;
-            const media = await resolveEmbedMedia(embed.embed);
-            if (!media || seen[media]) continue;
-            seen[media] = true;
-            const item = resourceOf(embed.name, media, embed.embed);
-            if (looksLikeMedia(media) && media.indexOf('data:') !== 0) resources.unshift(item);
-            else resources.push(item);
+            await addFromOption(queue[i]);
+            if (resources.length) break;
         } catch (err) {
-            console.log('[krx18] embed skip:', options[i].name, err.message || err);
+            console.log('[krx18] embed skip:', queue[i].name, err.message || err);
         }
     }
     const playable = resources.filter(function (r) { return looksLikeMedia(r.url); });
@@ -760,9 +832,28 @@ async function collectResourcesFromHtml(html, link) {
     return playable;
 }
 
+function pickMovieLink(params) {
+    const cands = [params && params.link, params && params.id, params && params.url, params && params.videoUrl];
+    for (let i = 0; i < cands.length; i++) {
+        const value = String(cands[i] || '');
+        if (/\/movies\//i.test(value) && value.indexOf('data:') !== 0 && !/\.(m3u8|mp4)(\?|$)/i.test(value)) {
+            return value;
+        }
+    }
+    return '';
+}
+
 async function collectResources(link) {
     if (!link) throw new Error('播放地址为空');
-    if (looksLikeMedia(link)) return [resourceOf('播放', link, SITE + '/')];
+    if (/^https?:\/\//i.test(link) && looksLikeMedia(link) && link.indexOf('data:') !== 0) {
+        return [resourceOf('播放', link, SITE + '/')];
+    }
+    const movieLink = /\/movies\//i.test(link) ? link : '';
+    if (!movieLink) throw new Error('播放地址为空');
+    return withRetry(function () { return collectResourcesFromHtmlWait(movieLink); }, 2);
+}
+
+async function collectResourcesFromHtmlWait(link) {
     const html = await httpGet(link);
     return collectResourcesFromHtml(html, link);
 }
@@ -831,13 +922,6 @@ async function loadDetail(link) {
 
     const html = await httpGet(link);
     const meta = parseDetailMeta(html, link);
-    let playable = null;
-    try {
-        const resources = await collectResourcesFromHtml(html, link);
-        playable = resources[0];
-    } catch (err) {
-        console.log('[krx18] detail resolve later:', err.message || err);
-    }
 
     return {
         id: link,
@@ -852,15 +936,19 @@ async function loadDetail(link) {
         peoples: meta.peoples,
         relatedItems: meta.relatedItems,
         link: link,
-        videoUrl: playable ? playable.url : '',
-        customHeaders: playable ? playable.customHeaders : requestHeaders(link),
-        playerType: playable ? playable.playerType : 'system',
+        customHeaders: requestHeaders(link),
+        playerType: 'system',
     };
 }
 
 async function loadResource(params) {
     params = params || {};
+    const movieLink = pickMovieLink(params);
+    if (movieLink) return collectResources(movieLink);
+
     const raw = params.link || params.videoUrl || params.url || params.id;
-    if (!raw) throw new Error('播放地址为空');
-    return collectResources(raw);
+    if (raw && looksLikeMedia(raw) && String(raw).indexOf('data:') !== 0) {
+        return [resourceOf('播放', raw, SITE + '/')];
+    }
+    throw new Error('播放地址为空');
 }
