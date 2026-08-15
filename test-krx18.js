@@ -40,7 +40,7 @@ global.Widget = {
             return request(url, { method: "GET", headers: (options && options.headers) || {} });
         },
         post: async (url, body, options) => {
-            calls.push({ method: "POST", url: url });
+            calls.push({ method: "POST", url: url, body: String(body || ""), headers: (options && options.headers) || {} });
             return request(url, {
                 method: "POST",
                 headers: (options && options.headers) || {},
@@ -162,6 +162,12 @@ function assertVideoItem(item, where) {
         assert.ok(/\.(m3u8|mp4)(\?|$)|data:application\/vnd\.apple\.mpegurl|\/m3u8\/|m3u8-play-/i.test(r.url), "page2[" + i + "] must be media, got " + r.url.slice(0, 100));
     });
     console.log("page2 resource", page2[0].title, page2Res.map((r) => r.url.slice(0, 80)));
+
+    // The playkrx18 API endpoint is shared by all movies.  It must explicitly
+    // disable response caching to avoid returning an earlier movie's m3u8.
+    const playCalls = calls.filter((c) => c.method === "POST" && c.url.indexOf("/playiframe") !== -1);
+    assert.ok(playCalls.length >= 2, "expected per-video playiframe POST requests");
+    playCalls.forEach((c) => assert.match(c.headers["Cache-Control"] || "", /no-cache/i, "playiframe request must disable caching"));
 
     const dooCalls = calls.filter((c) => c.url.indexOf("/wp-json/dooplayer/v2/") !== -1);
     assert.ok(dooCalls.length >= 1, "dooplayer API was not called");

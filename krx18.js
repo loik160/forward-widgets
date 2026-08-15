@@ -127,13 +127,16 @@ async function httpGet(url, referer) {
     return typeof data === 'string' ? data : String(data);
 }
 
-async function httpPostForm(url, body, referer) {
+async function httpPostForm(url, body, referer, extraHeaders) {
     return withRetry(async function () {
         const headers = requestHeaders(referer);
         headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
         headers['Accept'] = 'application/json, text/javascript, */*; q=0.01';
         headers['X-Requested-With'] = 'XMLHttpRequest';
         headers['Origin'] = (referer || url).split('/').slice(0, 3).join('/');
+        if (extraHeaders) {
+            for (const key in extraHeaders) headers[key] = extraHeaders[key];
+        }
         const response = await Widget.http.post(url, body, { headers: headers });
         if (!response || response.data == null) throw new Error('POST 失败: ' + url);
         return response.data;
@@ -750,6 +753,8 @@ async function resolvePlaykrx18(embedUrl) {
         console.log('[krx18] view ping skip', err.message || err);
     }
 
+    // The play API uses one endpoint for every movie.  Explicitly prohibit
+    // response reuse so a previous movie's m3u8 is never returned here.
     const endpoint = api + '/playiframe';
     console.log('[krx18] playiframe:', endpoint);
     const attempts = [
@@ -758,7 +763,10 @@ async function resolvePlaykrx18(embedUrl) {
     ];
     for (let i = 0; i < attempts.length; i++) {
         try {
-            const raw = await httpPostForm(endpoint, 'data=' + encodeURIComponent(attempts[i]), embedUrl);
+            const raw = await httpPostForm(endpoint, 'data=' + encodeURIComponent(attempts[i]), embedUrl, {
+                'Cache-Control': 'no-cache, no-store, max-age=0',
+                'Pragma': 'no-cache',
+            });
             const media = extractMediaFromPlayResponse(raw);
             if (media) return media;
             const preview = typeof raw === 'string' ? raw.slice(0, 180) : JSON.stringify(raw).slice(0, 180);
