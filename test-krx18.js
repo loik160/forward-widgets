@@ -76,6 +76,18 @@ function assertVideoItem(item, where) {
 }
 
 (async () => {
+    assert.equal(
+        cryptoJsDecrypt("53616c7465645f5f826a00a746b49747abff8e2a8adb90f4f64c0983fb895d3c8018570c2c2f886dcaa4a6f0c2140ddb", "jcLycoRJT6OWjoWspgLMOZwS3aSS0lEn"),
+        "6a7df19bee633ccb01c0d498"
+    );
+    assert.equal(
+        cryptoJsDecrypt("53616c7465645f5f761b6882efc19a1bdd36e794d845bba48a7aab14b3619b888be6b023614048912c5000101e094f8d", "PZZ3J3LDbLT0GY7qSA5wW5vchqgpO36O"),
+        "64ca9e03aa97fec013a4c341"
+    );
+    assert.equal(cryptoJsDecrypt(cryptoJsEncrypt("hello-krx18", "vlVbUQhkOhoSfyteyzGeeDzU0BHoeTyZ"), "vlVbUQhkOhoSfyteyzGeeDzU0BHoeTyZ"), "hello-krx18");
+    assert.equal(md5hex("abc"), "900150983cd24fb0d6963f7d28e17f72");
+    console.log("crypto ok");
+
     const movies = await getMovies({ page: 1 });
     assert.ok(movies.length >= 8, "movies list too short: " + movies.length);
     movies.slice(0, 5).forEach((it, i) => assertVideoItem(it, "movies[" + i + "]"));
@@ -101,7 +113,9 @@ function assertVideoItem(item, where) {
     assert.equal(detail.link, movies[0].link);
     assert.ok(detail.title, "detail title");
     assert.ok(!/^Free Watch/i.test(detail.title), "detail title should not be SEO title: " + detail.title);
-    assert.ok(detail.videoUrl, "detail videoUrl");
+    if (detail.videoUrl) {
+        assert.ok(looksLikeMedia(detail.videoUrl) || /\.(m3u8|mp4)|data:application\/vnd\.apple\.mpegurl/i.test(detail.videoUrl), "detail videoUrl should be media: " + detail.videoUrl.slice(0, 80));
+    }
     assert.equal(detail.stills, undefined);
     assert.ok(Array.isArray(detail.genreItems) || detail.genreItems === undefined || Array.isArray(detail.genreItems));
     if (detail.genreItems && detail.genreItems.length) {
@@ -118,6 +132,8 @@ function assertVideoItem(item, where) {
         assert.ok(r.url, "resource[" + i + "].url");
         assert.ok(r.name, "resource[" + i + "].name");
         assert.ok(r.playerType === "app" || r.playerType === "system", "playerType");
+        assert.ok(/\.(m3u8|mp4)(\?|$)|data:application\/vnd\.apple\.mpegurl/i.test(r.url), "resource[" + i + "] must be media, got " + r.url.slice(0, 100));
+        assert.ok(!/playkrx18\.site\/play\/|loadvid\.com\/videos\/play\/|mov18plus\.cloud\/\?v=/i.test(r.url), "resource[" + i + "] is still an embed page");
     });
     console.log("resources", resources.map((r) => r.name + " -> " + r.url.slice(0, 70)));
 
@@ -127,8 +143,10 @@ function assertVideoItem(item, where) {
     console.log("dooplayer", dooCalls[0].url);
 
     const clip = await loadDetail("https://krx18.com/movies/593486/");
-    assert.ok(clip.videoUrl, "clip videoUrl");
-    console.log("clip", clip.title, clip.videoUrl.slice(0, 80));
+    console.log("clip", clip.title, clip.videoUrl ? clip.videoUrl.slice(0, 80) : "(no direct url)");
+    if (clip.videoUrl) {
+        assert.ok(/\.(m3u8|mp4)|data:application\/vnd\.apple\.mpegurl/i.test(clip.videoUrl), "clip media url");
+    }
 
     console.log("✅ krx18 live ok", { calls: calls.length, movies: movies.length, resources: resources.length });
 })().catch((e) => {

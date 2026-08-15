@@ -1,6 +1,6 @@
 // KRX18 Forward Widget
 // 站点：https://krx18.com/  （DooPlay 主题）
-// 列表/搜索走站点 HTML；播放先走 DooPlay 线路，再解析 loadvid 的 HLS。
+// 列表/搜索走站点 HTML；播放解析 playkrx18 / loadvid 直链，不再把网页地址交给播放器。
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const SITE = 'https://krx18.com';
@@ -24,7 +24,7 @@ var WidgetMetadata = {
     description: "KRX18 情色电影 / 韩日影片，支持分类、搜索与多线路播放",
     author: "loik160",
     site: SITE,
-    version: "1.0.0",
+    version: "1.1.0",
     requiredVersion: "0.0.1",
     detailCacheDuration: 0,
     modules: [
@@ -94,6 +94,17 @@ async function httpGet(url, referer) {
     return typeof data === 'string' ? data : String(data);
 }
 
+async function httpPostForm(url, body, referer) {
+    const headers = requestHeaders(referer);
+    headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+    headers['Accept'] = 'application/json, text/javascript, */*; q=0.01';
+    headers['X-Requested-With'] = 'XMLHttpRequest';
+    headers['Origin'] = (referer || url).split('/').slice(0, 3).join('/');
+    const response = await Widget.http.post(url, body, { headers: headers });
+    if (!response || response.data == null) throw new Error('POST 失败: ' + url);
+    return response.data;
+}
+
 async function httpPostJson(url, body, referer, extraHeaders) {
     const headers = requestHeaders(referer);
     headers['Content-Type'] = 'application/json';
@@ -105,6 +116,197 @@ async function httpPostJson(url, body, referer, extraHeaders) {
     const response = await Widget.http.post(url, JSON.stringify(body), { headers: headers });
     if (!response || response.data == null) throw new Error('POST 失败: ' + url);
     return response.data;
+}
+
+const PLAY_FILE_KEY = 'jcLycoRJT6OWjoWspgLMOZwS3aSS0lEn';
+const PLAY_USER_KEY = 'PZZ3J3LDbLT0GY7qSA5wW5vchqgpO36O';
+const PLAY_REQ_KEY = 'vlVbUQhkOhoSfyteyzGeeDzU0BHoeTyZ';
+const PLAY_API_FALLBACK = 'https://api-play-240924.playkrx18.site/api/tp1rd';
+
+function md5(bytes) {
+    if (typeof bytes === 'string') bytes = utf8Encode(bytes);
+    const x = [];
+    for (let i = 0; i < bytes.length; i++) x[i >> 2] |= bytes[i] << ((i % 4) << 3);
+    const len = bytes.length * 8;
+    x[len >> 5] |= 0x80 << (len % 32);
+    x[(((len + 64) >>> 9) << 4) + 14] = len;
+    let a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
+    const add = function (x, y) { const lsw = (x & 0xffff) + (y & 0xffff); return (((x >> 16) + (y >> 16) + (lsw >> 16)) << 16) | (lsw & 0xffff); };
+    const rol = function (n, c) { return (n << c) | (n >>> (32 - c)); };
+    const cmn = function (q, a, b, x, s, t) { return add(rol(add(add(a, q), add(x, t)), s), b); };
+    const ff = function (a, b, c, d, x, s, t) { return cmn((b & c) | ((~b) & d), a, b, x, s, t); };
+    const gg = function (a, b, c, d, x, s, t) { return cmn((b & d) | (c & (~d)), a, b, x, s, t); };
+    const hh = function (a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); };
+    const ii = function (a, b, c, d, x, s, t) { return cmn(c ^ (b | (~d)), a, b, x, s, t); };
+    for (let i = 0; i < x.length; i += 16) {
+        const oa = a, ob = b, oc = c, od = d;
+        a = ff(a, b, c, d, x[i + 0], 7, -680876936); d = ff(d, a, b, c, x[i + 1], 12, -389564586); c = ff(c, d, a, b, x[i + 2], 17, 606105819); b = ff(b, c, d, a, x[i + 3], 22, -1044525330);
+        a = ff(a, b, c, d, x[i + 4], 7, -176418897); d = ff(d, a, b, c, x[i + 5], 12, 1200080426); c = ff(c, d, a, b, x[i + 6], 17, -1473231341); b = ff(b, c, d, a, x[i + 7], 22, -45705983);
+        a = ff(a, b, c, d, x[i + 8], 7, 1770035416); d = ff(d, a, b, c, x[i + 9], 12, -1958414417); c = ff(c, d, a, b, x[i + 10], 17, -42063); b = ff(b, c, d, a, x[i + 11], 22, -1990404162);
+        a = ff(a, b, c, d, x[i + 12], 7, 1804603682); d = ff(d, a, b, c, x[i + 13], 12, -40341101); c = ff(c, d, a, b, x[i + 14], 17, -1502002290); b = ff(b, c, d, a, x[i + 15], 22, 1236535329);
+        a = gg(a, b, c, d, x[i + 1], 5, -165796510); d = gg(d, a, b, c, x[i + 6], 9, -1069501632); c = gg(c, d, a, b, x[i + 11], 14, 643717713); b = gg(b, c, d, a, x[i + 0], 20, -373897302);
+        a = gg(a, b, c, d, x[i + 5], 5, -701558691); d = gg(d, a, b, c, x[i + 10], 9, 38016083); c = gg(c, d, a, b, x[i + 15], 14, -660478335); b = gg(b, c, d, a, x[i + 4], 20, -405537848);
+        a = gg(a, b, c, d, x[i + 9], 5, 568446438); d = gg(d, a, b, c, x[i + 14], 9, -1019803690); c = gg(c, d, a, b, x[i + 3], 14, -187363961); b = gg(b, c, d, a, x[i + 8], 20, 1163531501);
+        a = gg(a, b, c, d, x[i + 13], 5, -1444681467); d = gg(d, a, b, c, x[i + 2], 9, -51403784); c = gg(c, d, a, b, x[i + 7], 14, 1735328473); b = gg(b, c, d, a, x[i + 12], 20, -1926607734);
+        a = hh(a, b, c, d, x[i + 5], 4, -378558); d = hh(d, a, b, c, x[i + 8], 11, -2022574463); c = hh(c, d, a, b, x[i + 11], 16, 1839030562); b = hh(b, c, d, a, x[i + 14], 23, -35309556);
+        a = hh(a, b, c, d, x[i + 1], 4, -1530992060); d = hh(d, a, b, c, x[i + 4], 11, 1272893353); c = hh(c, d, a, b, x[i + 7], 16, -155497632); b = hh(b, c, d, a, x[i + 10], 23, -1094730640);
+        a = hh(a, b, c, d, x[i + 13], 4, 681279174); d = hh(d, a, b, c, x[i + 0], 11, -358537222); c = hh(c, d, a, b, x[i + 3], 16, -722521979); b = hh(b, c, d, a, x[i + 6], 23, 76029189);
+        a = hh(a, b, c, d, x[i + 9], 4, -640364487); d = hh(d, a, b, c, x[i + 12], 11, -421815835); c = hh(c, d, a, b, x[i + 15], 16, 530742520); b = hh(b, c, d, a, x[i + 2], 23, -995338651);
+        a = ii(a, b, c, d, x[i + 0], 6, -198630844); d = ii(d, a, b, c, x[i + 7], 10, 1126891415); c = ii(c, d, a, b, x[i + 14], 15, -1416354905); b = ii(b, c, d, a, x[i + 5], 21, -57434055);
+        a = ii(a, b, c, d, x[i + 12], 6, 1700485571); d = ii(d, a, b, c, x[i + 3], 10, -1894986606); c = ii(c, d, a, b, x[i + 10], 15, -1051523); b = ii(b, c, d, a, x[i + 1], 21, -2054922799);
+        a = ii(a, b, c, d, x[i + 8], 6, 1873313359); d = ii(d, a, b, c, x[i + 15], 10, -30611744); c = ii(c, d, a, b, x[i + 6], 15, -1560198380); b = ii(b, c, d, a, x[i + 13], 21, 1309151649);
+        a = ii(a, b, c, d, x[i + 4], 6, -145523070); d = ii(d, a, b, c, x[i + 11], 10, -1120210379); c = ii(c, d, a, b, x[i + 2], 15, 718787259); b = ii(b, c, d, a, x[i + 9], 21, -343485551);
+        a = add(a, oa); b = add(b, ob); c = add(c, oc); d = add(d, od);
+    }
+    const out = [];
+    [a, b, c, d].forEach(function (n) { for (let i = 0; i < 4; i++) out.push((n >>> (i * 8)) & 255); });
+    return out;
+}
+function md5hex(data) {
+    return md5(data).map(function (b) { return ('0' + (b & 255).toString(16)).slice(-2); }).join('');
+}
+function utf8Encode(str) {
+    const s = unescape(encodeURIComponent(String(str)));
+    const out = [];
+    for (let i = 0; i < s.length; i++) out.push(s.charCodeAt(i) & 255);
+    return out;
+}
+function utf8Decode(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    try { return decodeURIComponent(escape(s)); } catch (e) { return s; }
+}
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+function b64enc(bytes) {
+    let out = '';
+    for (let i = 0; i < bytes.length; i += 3) {
+        const a = bytes[i], b = bytes[i + 1], c = bytes[i + 2];
+        out += B64[a >> 2];
+        out += B64[((a & 3) << 4) | ((b || 0) >> 4)];
+        out += i + 1 < bytes.length ? B64[((b & 15) << 2) | ((c || 0) >> 6)] : '=';
+        out += i + 2 < bytes.length ? B64[c & 63] : '=';
+    }
+    return out;
+}
+function b64dec(str) {
+    str = String(str || '').replace(/[^A-Za-z0-9+/=]/g, '');
+    const out = [];
+    for (let i = 0; i < str.length; i += 4) {
+        const a = B64.indexOf(str[i]), b = B64.indexOf(str[i + 1]);
+        const c = B64.indexOf(str[i + 2]), d = B64.indexOf(str[i + 3]);
+        out.push(((a << 2) | (b >> 4)) & 255);
+        if (str[i + 2] !== '=') out.push((((b & 15) << 4) | (c >> 2)) & 255);
+        if (str[i + 3] !== '=') out.push((((c & 3) << 6) | d) & 255);
+    }
+    return out;
+}
+function hexToBytes(hex) {
+    const s = String(hex || '').replace(/[^0-9a-f]/gi, '');
+    const out = [];
+    for (let i = 0; i < s.length; i += 2) out.push(parseInt(s.substr(i, 2), 16));
+    return out;
+}
+function evpKDF(password, salt, keyLen, ivLen) {
+    const pass = typeof password === 'string' ? utf8Encode(password) : password;
+    let derived = [], block = [];
+    while (derived.length < keyLen + ivLen) {
+        block = md5(block.concat(pass, salt));
+        derived = derived.concat(block);
+    }
+    return { key: derived.slice(0, keyLen), iv: derived.slice(keyLen, keyLen + ivLen) };
+}
+const SBOX = [99,124,119,123,242,107,111,197,48,1,103,43,254,215,171,118,202,130,201,125,250,89,71,240,173,212,162,175,156,164,114,192,183,253,147,38,54,63,247,204,52,165,229,241,113,216,49,21,4,199,35,195,24,150,5,154,7,18,128,226,235,39,178,117,9,131,44,26,27,110,90,160,82,59,214,179,41,227,47,132,83,209,0,237,32,252,177,91,106,203,190,57,74,76,88,207,208,239,170,251,67,77,51,133,69,249,2,127,80,60,159,168,81,163,64,143,146,157,56,245,188,182,218,33,16,255,243,210,205,12,19,236,95,151,68,23,196,167,126,61,100,93,25,115,96,129,79,220,34,42,144,136,70,238,184,20,222,94,11,219,224,50,58,10,73,6,36,92,194,211,172,98,145,149,228,121,231,200,55,109,141,213,78,169,108,86,244,234,101,122,174,8,186,120,37,46,28,166,180,198,232,221,116,31,75,189,139,138,112,62,181,102,72,3,246,14,97,53,87,185,134,193,29,158,225,248,152,17,105,217,142,148,155,30,135,233,206,85,40,223,140,161,137,13,191,230,66,104,65,153,45,15,176,84,187,22];
+const INV_SBOX = [];
+for (let i = 0; i < 256; i++) INV_SBOX[SBOX[i]] = i;
+const RCON = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
+function xtime(a) { a &= 255; return ((a << 1) ^ ((a & 0x80) ? 0x1b : 0)) & 255; }
+function mul(a, b) { let p = 0; for (let i = 0; i < 8; i++) { if (b & 1) p ^= a; const hi = a & 0x80; a = (a << 1) & 255; if (hi) a ^= 0x1b; b >>= 1; } return p & 255; }
+function subWord(w) { return [SBOX[w[0]], SBOX[w[1]], SBOX[w[2]], SBOX[w[3]]]; }
+function rotWord(w) { return [w[1], w[2], w[3], w[0]]; }
+function xorW(a, b) { return [a[0] ^ b[0], a[1] ^ b[1], a[2] ^ b[2], a[3] ^ b[3]]; }
+function expandKey(key) {
+    const Nk = key.length / 4, Nr = Nk + 6, w = [];
+    for (let i = 0; i < Nk; i++) w[i] = [key[4 * i], key[4 * i + 1], key[4 * i + 2], key[4 * i + 3]];
+    for (let i = Nk; i < 4 * (Nr + 1); i++) {
+        let temp = w[i - 1].slice();
+        if (i % Nk === 0) temp = xorW(subWord(rotWord(temp)), [RCON[i / Nk], 0, 0, 0]);
+        else if (Nk > 6 && i % Nk === 4) temp = subWord(temp);
+        w[i] = xorW(w[i - Nk], temp);
+    }
+    return { w: w, Nr: Nr };
+}
+function addRoundKey(s, w, rnd) { for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) s[r][c] ^= w[rnd * 4 + c][r]; }
+function subBytes(s, inv) { const box = inv ? INV_SBOX : SBOX; for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) s[r][c] = box[s[r][c]]; }
+function shiftRows(s, inv) { for (let r = 1; r < 4; r++) { const row = s[r].slice(); for (let c = 0; c < 4; c++) s[r][c] = inv ? row[(c - r + 4) % 4] : row[(c + r) % 4]; } }
+function mixColumns(s, inv) {
+    for (let c = 0; c < 4; c++) {
+        const a = [s[0][c], s[1][c], s[2][c], s[3][c]];
+        if (!inv) {
+            s[0][c] = xtime(a[0]) ^ xtime(a[1]) ^ a[1] ^ a[2] ^ a[3];
+            s[1][c] = a[0] ^ xtime(a[1]) ^ xtime(a[2]) ^ a[2] ^ a[3];
+            s[2][c] = a[0] ^ a[1] ^ xtime(a[2]) ^ xtime(a[3]) ^ a[3];
+            s[3][c] = xtime(a[0]) ^ a[0] ^ a[1] ^ a[2] ^ xtime(a[3]);
+        } else {
+            s[0][c] = mul(a[0], 14) ^ mul(a[1], 11) ^ mul(a[2], 13) ^ mul(a[3], 9);
+            s[1][c] = mul(a[0], 9) ^ mul(a[1], 14) ^ mul(a[2], 11) ^ mul(a[3], 13);
+            s[2][c] = mul(a[0], 13) ^ mul(a[1], 9) ^ mul(a[2], 14) ^ mul(a[3], 11);
+            s[3][c] = mul(a[0], 11) ^ mul(a[1], 13) ^ mul(a[2], 9) ^ mul(a[3], 14);
+        }
+    }
+}
+function aesBlock(input, exp, inv) {
+    const s = [[], [], [], []];
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) s[r][c] = input[c * 4 + r];
+    if (!inv) {
+        addRoundKey(s, exp.w, 0);
+        for (let rnd = 1; rnd < exp.Nr; rnd++) { subBytes(s, false); shiftRows(s, false); mixColumns(s, false); addRoundKey(s, exp.w, rnd); }
+        subBytes(s, false); shiftRows(s, false); addRoundKey(s, exp.w, exp.Nr);
+    } else {
+        addRoundKey(s, exp.w, exp.Nr);
+        for (let rnd = exp.Nr - 1; rnd > 0; rnd--) { shiftRows(s, true); subBytes(s, true); addRoundKey(s, exp.w, rnd); mixColumns(s, true); }
+        shiftRows(s, true); subBytes(s, true); addRoundKey(s, exp.w, 0);
+    }
+    const out = [];
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) out.push(s[r][c]);
+    return out;
+}
+function xorBlock(a, b) { return a.map(function (v, i) { return v ^ b[i]; }); }
+function pkcs7pad(data) { const n = 16 - (data.length % 16); const out = data.slice(); for (let i = 0; i < n; i++) out.push(n); return out; }
+function pkcs7unpad(data) { if (!data.length) return data; const n = data[data.length - 1]; if (n < 1 || n > 16 || n > data.length) return data; return data.slice(0, data.length - n); }
+function aesCbcEncrypt(plain, key, iv) {
+    const exp = expandKey(key), padded = pkcs7pad(plain), out = [];
+    let prev = iv.slice();
+    for (let i = 0; i < padded.length; i += 16) {
+        const blk = xorBlock(padded.slice(i, i + 16), prev);
+        prev = aesBlock(blk, exp, false);
+        for (let j = 0; j < 16; j++) out.push(prev[j]);
+    }
+    return out;
+}
+function aesCbcDecrypt(cipher, key, iv) {
+    const exp = expandKey(key), out = [];
+    let prev = iv.slice();
+    for (let i = 0; i < cipher.length; i += 16) {
+        const blk = cipher.slice(i, i + 16);
+        const plain = xorBlock(aesBlock(blk, exp, true), prev);
+        prev = blk;
+        for (let j = 0; j < 16; j++) out.push(plain[j]);
+    }
+    return pkcs7unpad(out);
+}
+function cryptoJsDecrypt(input, pass) {
+    const s = String(input || '').trim();
+    const raw = (/^[0-9a-f]+$/i.test(s) && s.indexOf('53616c7465645f5f') === 0) ? hexToBytes(s) : b64dec(s);
+    if (raw.length < 16) throw new Error('cipher too short');
+    const kv = evpKDF(pass, raw.slice(8, 16), 32, 16);
+    return utf8Decode(aesCbcDecrypt(raw.slice(16), kv.key, kv.iv));
+}
+function cryptoJsEncrypt(plain, pass) {
+    const salt = [];
+    for (let i = 0; i < 8; i++) salt.push(Math.floor(Math.random() * 256));
+    const kv = evpKDF(pass, salt, 32, 16);
+    const ct = aesCbcEncrypt(utf8Encode(plain), kv.key, kv.iv);
+    return b64enc(utf8Encode('Salted__').concat(salt, ct));
 }
 
 function decodeHtml(text) {
@@ -359,6 +561,125 @@ function pickLoadvidConfig(html) {
     return { hash: hash, token: token };
 }
 
+function looksLikeMedia(url) {
+    const s = String(url || '');
+    return /\.(m3u8|mp4)(\?|$)/i.test(s) || /^data:application\/vnd\.apple\.mpegurl/i.test(s);
+}
+
+function cleanMediaUrl(url) {
+    return String(url || '').replace(/[\\,;"')\]]+$/g, '');
+}
+
+function findMediaUrl(text) {
+    const urls = String(text || '').match(/https?:\/\/[^\s"'<>\\]+/g) || [];
+    for (let i = 0; i < urls.length; i++) {
+        const url = cleanMediaUrl(urls[i]);
+        if (looksLikeMedia(url)) return url;
+    }
+    const plain = cleanMediaUrl(text);
+    return looksLikeMedia(plain) ? plain : '';
+}
+
+function maybeDecrypt(text) {
+    const s = String(text || '').trim();
+    const payload = s.split('|')[0];
+    if (!payload) return s;
+    if (payload.indexOf('U2FsdGVkX1') === 0 || payload.indexOf('53616c7465645f5f') === 0 || payload.indexOf('Salted__') === 0) {
+        try { return cryptoJsDecrypt(payload, PLAY_REQ_KEY); } catch (e) { return s; }
+    }
+    return s;
+}
+
+function extractMediaFromPlayResponse(raw) {
+    const bag = [];
+    function take(value) {
+        if (value == null) return;
+        if (typeof value === 'string') {
+            bag.push(value);
+            const decoded = maybeDecrypt(value);
+            if (decoded !== value) {
+                bag.push(decoded);
+                const inner = parseJsonSafe(decoded);
+                if (inner && typeof inner === 'object') take(inner);
+            }
+            return;
+        }
+        if (typeof value === 'object') {
+            const keys = ['url', 'file', 'hls', 'link', 'src', 'video', 'data', 'source', 'embed_url', 'videoUrl', 'play_url'];
+            for (let i = 0; i < keys.length; i++) if (value[keys[i]]) take(value[keys[i]]);
+        }
+    }
+    take(raw);
+    take(parseJsonSafe(raw));
+    take(typeof raw === 'string' ? raw : JSON.stringify(raw || ''));
+    for (let i = 0; i < bag.length; i++) {
+        const url = findMediaUrl(bag[i]);
+        if (url) return url;
+    }
+    return '';
+}
+
+function cryptoJsEncryptHex(plain, pass) {
+    const salt = [];
+    for (let i = 0; i < 8; i++) salt.push(Math.floor(Math.random() * 256));
+    const kv = evpKDF(pass, salt, 32, 16);
+    const ct = aesCbcEncrypt(utf8Encode(plain), kv.key, kv.iv);
+    return utf8Encode('Salted__').concat(salt, ct).map(function (b) {
+        return ('0' + (b & 255).toString(16)).slice(-2);
+    }).join('');
+}
+
+function playkrxPayload(idfile, iduser, hlsSupport) {
+    return JSON.stringify({
+        idfile: idfile,
+        iduser: iduser,
+        domain_play: SITE,
+        platform: 'MacIntel',
+        hlsSupport: !!hlsSupport,
+        jwplayer: {
+            Browser: { chrome: true, version: { version: '131.0.0', major: 131, minor: 0 } },
+            OS: { mac: true, version: { version: '10.15.7' } },
+            Features: { flash: false, flashVersion: 0, iframe: true, backgroundLoading: true, passiveEventListeners: true },
+            browser: { chrome: true },
+            os: { mac: true },
+            features: { hls: true },
+        },
+    });
+}
+
+async function resolvePlaykrx18(embedUrl) {
+    const html = await httpGet(embedUrl, SITE + '/');
+    const idfileEnc = (html.match(/idfile_enc\s*=\s*["']([^"']+)/) || [])[1];
+    const idUserEnc = (html.match(/idUser_enc\s*=\s*["']([^"']+)/) || [])[1];
+    const api = ((html.match(/DOMAIN_API\s*=\s*['"]([^'"]+)/) || [])[1] || PLAY_API_FALLBACK).replace(/\/$/, '');
+    if (!idfileEnc || !idUserEnc) throw new Error('playkrx18 缺少加密 ID');
+
+    const idfile = cryptoJsDecrypt(idfileEnc, PLAY_FILE_KEY);
+    const iduser = cryptoJsDecrypt(idUserEnc, PLAY_USER_KEY);
+    const endpoint = api + '/playiframe';
+    console.log('[krx18] playiframe:', endpoint);
+    const attempts = [
+        { packed: cryptoJsEncrypt(playkrxPayload(idfile, iduser, true), PLAY_REQ_KEY), as: 'form' },
+        { packed: cryptoJsEncryptHex(playkrxPayload(idfile, iduser, true), PLAY_REQ_KEY), as: 'form' },
+    ];
+    for (let i = 0; i < attempts.length; i++) {
+        const cipher = attempts[i].packed;
+        const packed = cipher + '|' + md5hex(cipher);
+        try {
+            const raw = attempts[i].as === 'form'
+                ? await httpPostForm(endpoint, 'data=' + encodeURIComponent(packed), embedUrl)
+                : await httpPostJson(endpoint, { data: packed }, embedUrl);
+            const media = extractMediaFromPlayResponse(raw);
+            if (media) return media;
+            const preview = typeof raw === 'string' ? raw.slice(0, 180) : JSON.stringify(raw).slice(0, 180);
+            console.log('[krx18] playiframe miss', attempts[i].as, preview);
+        } catch (err) {
+            console.log('[krx18] playiframe err', err.message || err);
+        }
+    }
+    throw new Error('playkrx18 未返回直链');
+}
+
 async function resolveLoadvidPlaylist(embedUrl) {
     const html = await httpGet(embedUrl, SITE + '/');
     const cfg = pickLoadvidConfig(html);
@@ -373,30 +694,49 @@ async function resolveLoadvidPlaylist(embedUrl) {
     });
     const text = typeof raw === 'string' ? raw : String(raw || '');
     if (text.indexOf('#EXTM3U') === -1) throw new Error('loadvid 未返回 m3u8');
-    const firstSeg = (text.match(/https?:\/\/[^\s]+\.(?:png|ts|m4s|jpg)[^\s]*/i) || [])[0] || '';
-    return { playlist: text, firstSeg: firstSeg, hash: cfg.hash };
-}
-
-function looksLikeMedia(url) {
-    return /\.(m3u8|mp4)(\?|$)/i.test(url || '');
-}
-
-function resourceOf(name, url, referer) {
+    const direct = findMediaUrl(text);
     return {
-        name: name || '播放',
-        url: url,
-        customHeaders: requestHeaders(referer || SITE + '/'),
-        playerType: looksLikeMedia(url) ? 'system' : 'app',
+        url: direct || ('data:application/vnd.apple.mpegurl;base64,' + b64enc(utf8Encode(text))),
+        playlist: text,
     };
 }
 
-async function collectResources(link) {
-    if (!link) throw new Error('播放地址为空');
-    if (looksLikeMedia(link)) return [resourceOf('播放', link, SITE + '/')];
+async function resolveEmbedMedia(embedUrl) {
+    if (looksLikeMedia(embedUrl)) return embedUrl;
+    const leaked = findMediaUrl(embedUrl);
+    if (leaked) return leaked;
 
-    const html = await httpGet(link);
+    if (/playkrx18\.site/i.test(embedUrl)) {
+        return resolvePlaykrx18(embedUrl);
+    }
+    if (/loadvid\.com/i.test(embedUrl)) {
+        const resolved = await resolveLoadvidPlaylist(embedUrl);
+        return resolved.url;
+    }
+
+    const html = await httpGet(embedUrl, SITE + '/');
+    const fromPage = findMediaUrl(html);
+    if (fromPage) return fromPage;
+    throw new Error('该线路没有可播放直链');
+}
+
+function resourceOf(name, url, referer) {
+    const isData = /^data:/i.test(url);
+    return {
+        name: name || '播放',
+        url: url,
+        customHeaders: isData ? undefined : requestHeaders(referer || SITE + '/'),
+        playerType: isData ? 'app' : 'system',
+    };
+}
+
+async function collectResourcesFromHtml(html, link) {
     const options = extractPlayerOptions(html);
     if (!options.length) throw new Error('未找到播放线路，页面结构可能已更新');
+    options.sort(function (a, b) {
+        const rank = function (o) { return /loadvid/i.test(String(o.server || o.name || '')) ? 0 : 1; };
+        return rank(a) - rank(b);
+    });
 
     const resources = [];
     const seen = {};
@@ -405,24 +745,26 @@ async function collectResources(link) {
             const embed = await fetchEmbed(options[i]);
             if (!embed.embed || seen[embed.embed]) continue;
             seen[embed.embed] = true;
-
-            if (/loadvid\.com/i.test(embed.embed)) {
-                try {
-                    await resolveLoadvidPlaylist(embed.embed);
-                    resources.unshift(resourceOf(embed.name, embed.embed, embed.embed));
-                    continue;
-                } catch (err) {
-                    console.log('[krx18] loadvid resolve skip:', err.message || err);
-                }
-            }
-
-            resources.push(resourceOf(embed.name, embed.embed, link));
+            const media = await resolveEmbedMedia(embed.embed);
+            if (!media || seen[media]) continue;
+            seen[media] = true;
+            const item = resourceOf(embed.name, media, embed.embed);
+            if (looksLikeMedia(media) && media.indexOf('data:') !== 0) resources.unshift(item);
+            else resources.push(item);
         } catch (err) {
             console.log('[krx18] embed skip:', options[i].name, err.message || err);
         }
     }
-    if (!resources.length) throw new Error('所有播放线路均失败');
-    return resources;
+    const playable = resources.filter(function (r) { return looksLikeMedia(r.url); });
+    if (!playable.length) throw new Error('所有播放线路均未解析到直链');
+    return playable;
+}
+
+async function collectResources(link) {
+    if (!link) throw new Error('播放地址为空');
+    if (looksLikeMedia(link)) return [resourceOf('播放', link, SITE + '/')];
+    const html = await httpGet(link);
+    return collectResourcesFromHtml(html, link);
 }
 
 function parseDetailMeta(html, link) {
@@ -489,8 +831,13 @@ async function loadDetail(link) {
 
     const html = await httpGet(link);
     const meta = parseDetailMeta(html, link);
-    const resources = await collectResources(link);
-    const playable = resources[0];
+    let playable = null;
+    try {
+        const resources = await collectResourcesFromHtml(html, link);
+        playable = resources[0];
+    } catch (err) {
+        console.log('[krx18] detail resolve later:', err.message || err);
+    }
 
     return {
         id: link,
@@ -505,9 +852,9 @@ async function loadDetail(link) {
         peoples: meta.peoples,
         relatedItems: meta.relatedItems,
         link: link,
-        videoUrl: playable.url,
-        customHeaders: playable.customHeaders,
-        playerType: playable.playerType,
+        videoUrl: playable ? playable.url : '',
+        customHeaders: playable ? playable.customHeaders : requestHeaders(link),
+        playerType: playable ? playable.playerType : 'system',
     };
 }
 
