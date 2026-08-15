@@ -21,7 +21,7 @@ https://raw.githubusercontent.com/loik160/forward-widgets/main/widgets.fwd
 | KBJFan | `kbjfan.com` | 1.0.0 | Korean BJ Dance / Nude |
 | exporntoons | `exporntoons.net` | 1.0.2 | ExPornToons 搜索 |
 | pppPorn | `ppp.porn` | 1.0.0 | PPP.Porn 分类与搜索 |
-| KRX18 | `krx18.com` | 1.6.0 | KRX18 情色电影分类与搜索 |
+| KRX18 | `krx18.com` | 1.7.0 | KRX18 情色电影分类与搜索 |
 
 ## 说明
 

@@ -5,6 +5,7 @@ const assert = require("assert/strict");
 
 const calls = [];
 const fileId = "6a5f35d8ee633ccb01a35233";
+const storage = {};
 
 global.Widget = {
     http: {
@@ -16,6 +17,9 @@ global.Widget = {
             if (/krx18\.com\/director\/sample-director\//i.test(url)) {
                 return { data: '<article class="item movies"><a href="/movies/directed-film/"><img src="/poster.jpg" alt="Directed Film"></a><h3><a href="/movies/directed-film/">Directed Film</a></h3></article>' };
             }
+            if (/krx18\.com\/wp-json\/dooplayer\/v2\/123\/movie\/1/i.test(url)) {
+                return { data: { embed_url: "https://play.playkrx18.site/play/" + fileId } };
+            }
             throw new Error("unmocked GET: " + url);
         },
         post: async (url, body, options) => {
@@ -25,13 +29,27 @@ global.Widget = {
         },
     },
     html: { load: () => ({}) },
-    storage: { get() {}, set() {} },
+    storage: {
+        get(key) { return storage[key]; },
+        set(key, value) { storage[key] = value; },
+    },
 };
 global.WidgetMetadata = {};
 
 eval(fs.readFileSync("./krx18.js", "utf8"));
 
 (async () => {
+    assert.equal(WidgetMetadata.version, "1.7.0");
+    assert.equal(WidgetMetadata.detailCacheDuration, 600);
+    assert.equal(WidgetMetadata.modules.find((m) => m.id === "loadResource").cacheDuration, 0);
+    assert.equal(playerOptionRank({ server: "Playkrx18" }), 0);
+    assert.equal(playerOptionRank({ server: "Loadvid" }), 1);
+
+    const cachedOption = { type: "movie", post: "123", nume: "1", name: "Server 1", server: "Playkrx18" };
+    await fetchEmbed(cachedOption);
+    await fetchEmbed(cachedOption);
+    assert.equal(calls.filter((c) => /wp-json\/dooplayer\/v2\/123\/movie\/1/.test(c.url)).length, 1, "embed endpoint should be cached");
+
     assert.equal(playFileIdFromUrl("https://play.playkrx18.site/play/" + fileId), fileId);
 
     const media = await resolvePlaykrx18("https://play.playkrx18.site/play/" + fileId);

@@ -25,9 +25,9 @@ var WidgetMetadata = {
     description: "KRX18 情色电影 / 韩日影片，支持分类、搜索与多线路播放",
     author: "loik160",
     site: SITE,
-    version: "1.6.0",
+    version: "1.7.0",
     requiredVersion: "0.0.1",
-    detailCacheDuration: 0,
+    detailCacheDuration: 600,
     modules: [
         { title: "最新电影", functionName: "getMovies", params: [{ name: "page", title: "页码", type: "page" }] },
         { title: "韩国", functionName: "getKorea", params: [{ name: "page", title: "页码", type: "page" }] },
@@ -105,7 +105,7 @@ async function withRetry(fn, times) {
             last = err;
             console.log('[krx18] retry', i + 1, '/', times, err.message || err);
             if (i < times - 1 && isTransientError(err)) await sleep(250 * (i + 1));
-            else if (i < times - 1) await sleep(150);
+            else break;
         }
     }
     throw last;
@@ -165,8 +165,8 @@ const PLAY_RESP_KEY = 'oJwmvmVBajMaRCTklxbfjavpQO7SZpsL';
 const PLAY_MD5_SUFFIX = 'KRWN3AdgmxEMcd2vLN1ju9qKe8Feco5h';
 const PLAY_USER_ID_FALLBACK = '64ca9e03aa97fec013a4c341';
 const PLAY_API_FALLBACK = 'https://api-play-240924.playkrx18.site/api/tp1rd';
-const PLAY_VIEW_FALLBACK = 'https://views.api9str25.cfd/view/';
-const PLAYER_OPTIONS_CACHE_MS = 5 * 60 * 1000;
+const PLAYER_OPTIONS_CACHE_MS = 30 * 60 * 1000;
+const EMBED_CACHE_MS = 15 * 60 * 1000;
 
 function md5(bytes) {
     if (typeof bytes === 'string') bytes = utf8Encode(bytes);
@@ -629,12 +629,38 @@ function parseJsonSafe(raw) {
 }
 
 async function fetchEmbed(option) {
+    const cacheKey = 'player-embed:' + option.type + ':' + option.post + ':' + option.nume;
+    if (Widget.storage && typeof Widget.storage.get === 'function') {
+        try {
+            const rawCache = Widget.storage.get(cacheKey);
+            const cached = typeof rawCache === 'string' ? JSON.parse(rawCache) : rawCache;
+            if (cached && cached.expiresAt > Date.now() && cached.embed && !looksLikeMedia(cached.embed)) {
+                console.log('[krx18] reuse cached embed:', option.name);
+                return {
+                    name: option.server ? (option.name + ' ' + option.server) : option.name,
+                    embed: cached.embed,
+                    server: option.server || '',
+                };
+            }
+        } catch (e) {}
+    }
+
     const url = SITE + '/wp-json/dooplayer/v2/' + option.post + '/' + option.type + '/' + option.nume;
     console.log('[krx18] dooplayer:', url);
     const raw = await httpGetRaw(url, SITE + '/');
     const data = parseJsonSafe(raw);
     const embed = data && (data.embed_url || data.embed || data.source || data.url);
     if (!embed) throw new Error('线路 ' + option.name + ' 无播放地址');
+    // Cache only the stable player page. Signed media URLs must always be
+    // requested again so a repeated play never reuses an expired signature.
+    if (!looksLikeMedia(embed) && Widget.storage && typeof Widget.storage.set === 'function') {
+        try {
+            Widget.storage.set(cacheKey, JSON.stringify({
+                expiresAt: Date.now() + EMBED_CACHE_MS,
+                embed: embed,
+            }));
+        } catch (e) {}
+    }
     return {
         name: option.server ? (option.name + ' ' + option.server) : option.name,
         embed: embed,
@@ -759,7 +785,7 @@ function playFileIdFromUrl(embedUrl) {
     return match ? match[1] : '';
 }
 
-async function requestPlaykrx18(idfile, iduser, api, viewApi, embedUrl) {
+async function requestPlaykrx18(idfile, iduser, api, embedUrl) {
     const endpoint = api + '/playiframe';
     console.log('[krx18] playiframe:', endpoint);
     const attempts = [
@@ -791,7 +817,6 @@ async function resolvePlaykrx18(embedUrl) {
             directId,
             PLAY_USER_ID_FALLBACK,
             PLAY_API_FALLBACK,
-            PLAY_VIEW_FALLBACK,
             embedUrl
         );
     }
@@ -802,14 +827,12 @@ async function resolvePlaykrx18(embedUrl) {
     const idfileEnc = (html.match(/idfile_enc\s*=\s*["']([^"']+)/) || [])[1];
     const idUserEnc = (html.match(/idUser_enc\s*=\s*["']([^"']+)/) || [])[1];
     const api = ((html.match(/DOMAIN_API\s*=\s*['"]([^'"]+)/) || [])[1] || PLAY_API_FALLBACK).replace(/\/$/, '');
-    const viewApi = ((html.match(/DOMAIN_API_VIEW\s*=\s*['"]([^'"]+)/) || [])[1] || PLAY_VIEW_FALLBACK).replace(/\/?$/, '/');
     if (!idfileEnc || !idUserEnc) throw new Error('playkrx18 缺少加密 ID');
 
     return requestPlaykrx18(
         cryptoJsDecrypt(idfileEnc, PLAY_FILE_KEY),
         cryptoJsDecrypt(idUserEnc, PLAY_USER_KEY),
         api,
-        viewApi,
         embedUrl
     );
 }
@@ -900,29 +923,16 @@ function readPlayerOptions(link) {
 
 async function collectResourcesFromOptions(options, link) {
     if (!options.length) throw new Error('未找到播放线路，页面结构可能已更新');
-    options.sort(function (a, b) {
-        const rank = function (o) { return /loadvid/i.test(String(o.server || o.name || '')) ? 0 : 1; };
-        return rank(a) - rank(b);
-    });
-
     const resources = [];
     const seen = {};
-    const preferred = [];
-    const fallback = [];
-    for (let i = 0; i < options.length; i++) {
-        if (/loadvid/i.test(String(options[i].server || options[i].name || ''))) preferred.push(options[i]);
-        else fallback.push(options[i]);
-    }
-    const queue = preferred.concat(fallback);
+    const queue = options.slice().sort(function (a, b) {
+        return playerOptionRank(a) - playerOptionRank(b);
+    });
 
     async function addFromOption(option) {
         const embed = await fetchEmbed(option);
         if (!embed.embed || seen[embed.embed]) return;
         seen[embed.embed] = true;
-        if (/playkrx18\.site/i.test(embed.embed) && resources.length) {
-            console.log('[krx18] skip playkrx18, already have a stream');
-            return;
-        }
         const media = await resolveEmbedMedia(embed.embed);
         if (!media || seen[media]) return;
         seen[media] = true;
@@ -942,6 +952,13 @@ async function collectResourcesFromOptions(options, link) {
     const playable = resources.filter(function (r) { return looksLikeMedia(r.url); });
     if (!playable.length) throw new Error('所有播放线路均未解析到直链');
     return playable;
+}
+
+function playerOptionRank(option) {
+    const server = String(option && (option.server || option.name) || '');
+    if (/playkrx18/i.test(server)) return 0;
+    if (/loadvid/i.test(server)) return 1;
+    return 2;
 }
 
 async function collectResourcesFromHtml(html, link) {
