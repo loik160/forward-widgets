@@ -28,6 +28,9 @@ function assertItem(item, where) {
     assert.ok(item.title, where + " title");
     assert.match(item.link, /huangguoai\.com\/detail\/\d+\//, where + " link");
     assert.ok(item.posterPath, where + " poster");
+    assert.equal(item.backdropPath, item.posterPath, where + " backdrop");
+    assert.equal(item.coverUrl, item.posterPath, where + " cover");
+    assert.ok(item.customHeaders && item.customHeaders.Referer, where + " image headers");
     assert.equal(item.poster_path, undefined, where + " raw poster field");
 }
 
@@ -67,8 +70,8 @@ function assertItem(item, where) {
     const firstResource = await loadResource({ link: detail.episodeItems[0].link });
     assert.equal(firstResource.length, 1);
     assert.match(firstResource[0].url, /\.m3u8(?:\?|$)/i);
-    assert.equal(firstResource[0].playerType, "system");
-    assert.equal(firstResource[0].customHeaders["X-Forward-Skip-Redirect-Probe"], undefined);
+    assert.equal(firstResource[0].playerType, "app");
+    assert.equal(firstResource[0].customHeaders["X-Forward-Skip-Redirect-Probe"], "1");
 
     const lastResource = await loadResource({ link: detail.episodeItems[detail.episodeItems.length - 1].link });
     assert.match(lastResource[0].url, /\.m3u8(?:\?|$)/i);
@@ -77,6 +80,10 @@ function assertItem(item, where) {
     const manifest = await fetch(firstResource[0].url, { headers: firstResource[0].customHeaders });
     assert.equal(manifest.ok, true, "manifest request failed");
     assert.match(await manifest.text(), /^#EXTM3U/);
+
+    const cover = await fetch(detail.posterPath, { headers: detail.customHeaders });
+    assert.equal(cover.ok, true, "cover request failed");
+    assert.ok((await cover.arrayBuffer()).byteLength > 1000, "cover body is empty");
 
     const tagList = await getNewest({ genreId: detail.genreItems[0].id, page: 1 });
     assert.ok(tagList.length >= 1, "tag routing failed");

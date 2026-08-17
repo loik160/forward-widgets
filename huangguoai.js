@@ -4,7 +4,7 @@ WidgetMetadata = {
     description: "黄果 AI 成人短剧、漫剧、换脸与魔改视频",
     author: "loik160",
     site: "https://huangguoai.com",
-    version: "1.0.0",
+    version: "1.0.1",
     requiredVersion: "0.0.1",
     detailCacheDuration: 300,
     modules: [
@@ -46,6 +46,20 @@ function mediaHeaders(referer) {
         "Referer": referer || SITE + "/",
         "Origin": SITE,
     };
+}
+
+function imageHeaders(referer) {
+    return {
+        "User-Agent": UA,
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "Referer": referer || SITE + "/",
+    };
+}
+
+function playbackHeaders(referer, isHls) {
+    const headers = mediaHeaders(referer);
+    if (isHls) headers["X-Forward-Skip-Redirect-Probe"] = "1";
+    return headers;
 }
 
 function sleep(ms) {
@@ -162,11 +176,13 @@ function parseCards(html) {
             title: title,
             link: link,
             posterPath: poster,
+            backdropPath: poster,
             coverUrl: poster,
             rating: ratingMatch ? parseFloat(ratingMatch[0]) : undefined,
             description: stripTags(descBlock),
             durationText: episodeText || typeName || undefined,
             genreTitle: typeName || undefined,
+            customHeaders: imageHeaders(link),
         });
     }
     return items;
@@ -205,11 +221,13 @@ function parseRankItems(html) {
             title: attr(openTag, "data-track-title") || stripTags(titleBlock) || ("视频 " + linkMatch[2]),
             link: link,
             posterPath: poster,
+            backdropPath: poster,
             coverUrl: poster,
             rating: ratingMatch ? parseFloat(ratingMatch[1]) : undefined,
             description: stripTags(descBlock),
             durationText: "第 " + rank + " 名 · 热力 " + (stripTags(heatBlock) || "--"),
             genreTitle: attr(openTag, "data-track-type-name") || undefined,
+            customHeaders: imageHeaders(link),
         });
     }
     return items;
@@ -308,6 +326,9 @@ function parseDetail(html, requestedLink) {
             link: playLink,
             episode: number,
             posterPath: poster,
+            backdropPath: poster,
+            coverUrl: poster,
+            customHeaders: imageHeaders(detailUrlFromLink(playLink)),
         });
     }
 
@@ -330,6 +351,7 @@ function parseDetail(html, requestedLink) {
         title: title || "黄果短剧",
         link: activeLink,
         posterPath: poster,
+        backdropPath: poster,
         coverUrl: poster,
         detailPoster: poster,
         rating: scoreMatch ? parseFloat(scoreMatch[1]) : undefined,
@@ -340,6 +362,7 @@ function parseDetail(html, requestedLink) {
         episode: activeEpisode,
         episodeItems: episodes,
         relatedItems: relatedItems,
+        customHeaders: imageHeaders(detailLink),
     };
 }
 
@@ -372,7 +395,8 @@ async function loadResource(params) {
     const raw = params.link || params.id || params.videoUrl || params.url;
     if (!raw) throw new Error("播放地址为空");
     if (/^https?:\/\/[^\s"']+\.(?:m3u8|mp4)(?:\?|$)/i.test(raw)) {
-        return [{ name: params.title || "播放", url: raw, customHeaders: mediaHeaders(SITE + "/"), playerType: "system" }];
+        const isHls = /\.m3u8(?:\?|$)/i.test(raw);
+        return [{ name: params.title || "播放", url: raw, customHeaders: playbackHeaders(SITE + "/", isHls), playerType: isHls ? "app" : "system" }];
     }
 
     const playPage = playPageFromLink(raw);
@@ -387,8 +411,8 @@ async function loadResource(params) {
         name: (data.title || params.title || "播放") + (episode ? " · 第 " + episode + " 集" : ""),
         description: /\.m3u8(?:\?|$)/i.test(media) ? "HLS" : "MP4",
         url: media,
-        customHeaders: mediaHeaders(playPage),
-        playerType: "system",
+        customHeaders: playbackHeaders(playPage, /\.m3u8(?:\?|$)/i.test(media)),
+        playerType: /\.m3u8(?:\?|$)/i.test(media) ? "app" : "system",
     }];
 }
 
